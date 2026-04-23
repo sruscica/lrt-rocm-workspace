@@ -488,6 +488,10 @@ Do NOT trust the PM's completion claim. Verify independently.
 - No build/test/review artifacts expected — skip to Step 1
 
 **For all other tasks** (design, bug, script):
+0. **Check Build Status in status.md.** Read the `Build Status` field.
+   - If `BUILT` → continue to checks below
+   - If `BUILD DEFERRED` → verification fails. Do NOT re-dispatch PM. Instead, dispatch build-expert directly: "Reviewer passed. Perform the actual build now." Then dispatch tester after a successful build. Update Build Status to `BUILT`. Then re-enter Phase 3 Step 0 from the top.
+   - If `NOT BUILT` or `BUILD FAILED` → verification fails. Dispatch build-expert directly. Same flow as BUILD DEFERRED above.
 1. Check that `<thinking_dir>/builds/` contains a build results file with a passing result
 2. Check that `<thinking_dir>/tests/` contains a test results file. Acceptable verdicts:
    - `pass` — full verification
@@ -495,7 +499,7 @@ Do NOT trust the PM's completion claim. Verify independently.
    - `fail` or missing → verification fails
 3. Check that `<thinking_dir>/reviews/` contains a reviewer output with `pass` verdict
 
-If ANY required artifacts are missing or show failures:
+If checks 1-3 fail (required artifacts missing or show failures):
 - Do NOT present completion to the user
 - Re-dispatch PM with: "Verification gate failed. Missing/failing: [list what's wrong]. Route to the appropriate agent."
 - Re-enter Phase 2
