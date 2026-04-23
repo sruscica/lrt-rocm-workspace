@@ -85,15 +85,23 @@ If the user corrects anything, re-dispatch PM with the corrections.
 
 **Step 3: Create thinking directory**
 
-Dispatch the Note-taker to create the directory structure:
+Create the directories yourself with a single mkdir command (NO brace expansion), then dispatch Note-taker for status.md only:
+
+```bash
+# Session runs this directly — NOT dispatched to an agent
+# IMPORTANT: Inline the full path. Do NOT use $VAR — it triggers expansion prompts.
+mkdir -p <workspace>/thinking/YYYY-MM-DD-<topic_slug>/analysis <workspace>/thinking/YYYY-MM-DD-<topic_slug>/plans <workspace>/thinking/YYYY-MM-DD-<topic_slug>/tests <workspace>/thinking/YYYY-MM-DD-<topic_slug>/reviews <workspace>/thinking/YYYY-MM-DD-<topic_slug>/investigations <workspace>/thinking/YYYY-MM-DD-<topic_slug>/builds <workspace>/thinking/YYYY-MM-DD-<topic_slug>/commits <workspace>/thinking/YYYY-MM-DD-<topic_slug>/scripts <workspace>/thinking/YYYY-MM-DD-<topic_slug>/pm-summaries <workspace>/thinking/YYYY-MM-DD-<topic_slug>/requests
+mkdir -p <workspace>/testing/YYYY-MM-DD-<topic_slug>
+```
+
+Then dispatch Note-taker to write status.md only:
 
 ```
 Agent(subagent_type: "note-taker", prompt: """
-Create the thinking directory at <workspace>/thinking/YYYY-MM-DD-<topic_slug>/ with:
-- status.md (use the initial template)
-- Subdirectories: analysis/, plans/, tests/, reviews/, investigations/, builds/, commits/, scripts/, pm-summaries/, requests/
-
-Also create <workspace>/testing/YYYY-MM-DD-<topic_slug>/ for test artifacts.
+Write the initial status.md to <thinking_dir>/status.md using the standard template.
+Topic: <topic_slug>
+Task: <task_summary>
+Starting agent: <starting_agent>
 """)
 ```
 
@@ -226,6 +234,17 @@ Agent(subagent_type: "<agent-name>", prompt: """
 You are the <agent-name> in the ROCm Agent Pipeline.
 You do NOT have the Agent tool. If you need another agent, state the need
 clearly in your output — which agent, what task, what files are relevant.
+
+COMMAND RULES (mandatory — violations prompt the user for approval):
+- NEVER use `cd /path && git ...` → use `git -C /path ...` instead
+- NEVER use `echo "$VAR"` or `printf ... "$VAR"` → use `printenv VAR` instead
+- NEVER use brace expansion `{a,b,c}` → spell out each argument
+- NEVER use `$VAR` or `$?` in any command → use `printenv VAR` or `cmd || echo FAILED`
+- NEVER use `${PIPESTATUS[0]}` or any `${...}` expansion → Bash tool reports exit codes automatically
+- NEVER use `| tee file; echo "${PIPESTATUS[0]}"` → just `| tee file` or `> file 2>&1`
+- NEVER use for/while loops with `$VAR` → spell out each command individually
+- NEVER use Catch2 `~[tag]` filter → list specific test names instead (triggers zsh syntax detection)
+- NEVER use `[[ -f /.dockerenv ]] && ...` with variable expansion in the same command
 
 Workspace: <workspace>
 Thinking directory: <thinking_dir>

@@ -16,6 +16,24 @@ You may be invoked by:
 - **Troubleshooter** — for regression tracking (git log, blame, bisect)
 - **Any agent** — for read-only git queries (log, blame, diff, show)
 
+## Command Rules — CRITICAL
+
+**NEVER use `cd /path && git ...`** — Claude Code prompts the user for approval on compound cd+git commands. Always use `git -C` instead:
+
+| Do NOT use | Use instead |
+|-----------|-------------|
+| `cd /path && git status` | `git -C /path status` |
+| `cd /path && git add file` | `git -C /path add file` |
+| `cd /path && git commit -m "msg"` | `git -C /path commit -m "msg"` |
+| `cd /path && git diff` | `git -C /path diff` |
+| `cd /path && git log` | `git -C /path log --oneline -5` |
+
+This applies to ALL git operations including submodule work. For submodules at `/workspace/rocm-systems`, use `git -C /workspace/rocm-systems <command>`.
+
+**NEVER use `echo "$VAR"`** — use `printenv VAR` instead.
+
+**NEVER use brace expansion** (`{a,b,c}`) — spell out each argument.
+
 ## Core Responsibilities
 
 1. **Commit code** incrementally as plan steps are implemented

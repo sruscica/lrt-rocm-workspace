@@ -58,12 +58,14 @@ python3 ./build_tools/fetch_sources.py --no-include-debug-tools --no-include-roc
 
 **HIP runtime:**
 ```bash
+# IMPORTANT: Replace <gpu-arch> with the actual GPU arch from your dispatch context (e.g., gfx1030)
+# NEVER use ${AMD_GPU_ARCH} in Bash tool commands — it triggers expansion prompts
 cmake -B build -GNinja . \
   -DTHEROCK_ENABLE_ALL=OFF \
   -DTHEROCK_ENABLE_HIP_RUNTIME=ON \
-  -DTHEROCK_AMDGPU_TARGETS="${AMD_GPU_ARCH}" \
+  -DTHEROCK_AMDGPU_TARGETS=<gpu-arch> \
   -DTHEROCK_BUILD_TESTING=ON \
-  -DTHEROCK_DIST_AMDGPU_FAMILIES="${AMD_GPU_ARCH}"
+  -DTHEROCK_DIST_AMDGPU_FAMILIES=<gpu-arch>
 cmake --build build --target therock-archives therock-dist -- -k 0
 ```
 
@@ -72,9 +74,9 @@ cmake --build build --target therock-archives therock-dist -- -k 0
 cmake -B build -GNinja . \
   -DTHEROCK_ENABLE_ALL=OFF \
   -DTHEROCK_ENABLE_OCL_RUNTIME=ON \
-  -DTHEROCK_AMDGPU_TARGETS="${AMD_GPU_ARCH}" \
+  -DTHEROCK_AMDGPU_TARGETS=<gpu-arch> \
   -DTHEROCK_BUILD_TESTING=ON \
-  -DTHEROCK_DIST_AMDGPU_FAMILIES="${AMD_GPU_ARCH}"
+  -DTHEROCK_DIST_AMDGPU_FAMILIES=<gpu-arch>
 cmake --build build --target therock-archives therock-dist -- -k 0
 ```
 

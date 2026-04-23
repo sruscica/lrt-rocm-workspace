@@ -83,9 +83,25 @@ When updating status.md, you MUST:
 | <hash> | <summary> | <plan step> | <iteration> |
 ```
 
+## Command Rules
+
+**NEVER use brace expansion** in mkdir or any command. Claude Code prompts the user for approval on brace expansion.
+
+| Do NOT use | Use instead |
+|-----------|-------------|
+| `mkdir -p /path/{a,b,c}` | `mkdir -p /path/a /path/b /path/c` |
+
+Always spell out each directory as a separate argument.
+
 ## Directory Creation
 
-When asked to create the initial thinking directory structure, create:
+When asked to create the initial thinking directory structure, create all directories with **individual arguments** (no brace expansion):
+
+```bash
+mkdir -p <base>/analysis <base>/plans <base>/tests <base>/reviews <base>/investigations <base>/builds <base>/commits <base>/scripts <base>/pm-summaries <base>/requests
+```
+
+Structure:
 ```
 <workspace>/thinking/<YYYY-MM-DD-topic-slug>/
 ├── status.md
@@ -97,7 +113,8 @@ When asked to create the initial thinking directory structure, create:
 ├── builds/
 ├── commits/
 ├── scripts/
-└── pm-summaries/
+├── pm-summaries/
+└── requests/
 ```
 
 The initial `status.md` template:
