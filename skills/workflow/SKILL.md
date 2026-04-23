@@ -373,7 +373,7 @@ For `knowledge` tasks: skip this check (no build/test expected).
 
 ### Mandatory Post-Commit Sequence
 
-After every `commit` action (for `design`, `bug`, or `script` tasks), the session MUST run the build-expert and tester before returning to PM routing. The PM is NOT consulted between commit and tester completion.
+After every `commit` action (for `design`, `bug`, or `script` tasks), the session MUST run the build-expert for diff analysis. The build-expert decides whether to build immediately or defer the build until after the reviewer passes.
 
 ```
 POST-COMMIT:
@@ -382,24 +382,43 @@ POST-COMMIT:
      - Files under rocm-systems/projects/clr/ or core/clr/ → "hip-clr+build"
      - Files under rocm-systems/projects/ocl-clr/ → "ocl-clr+build"
      - Standalone .hip/.cpp files (not in TheRock tree) → compile with hipcc directly
-     - Shell scripts or non-compiled files → SKIP build, go to step 3
+     - Shell scripts or non-compiled files → SKIP build-expert entirely, go to step 4
 
-  2. Dispatch build-expert:
-     "Incremental rebuild of <component>. Run: ninja -C build <target> in <workspace>.
-      Workspace: <workspace>. Report success/failure and output binary paths."
+  2. Dispatch build-expert (diff analysis + conditional build):
+     "Post-commit dispatch. Analyze the committed diff first. If ALL changes are
+      non-functional (comments, docs, whitespace, log strings, .md/.txt files),
+      report BUILD_DECISION: DEFERRED and skip building. If ANY changes are functional,
+      build incrementally and report BUILD_DECISION: BUILT.
+      Component: <component>. Target: <target>. Workspace: <workspace>."
      - Handle output saving (Note-taker for build-expert)
-     - If build FAILS: send build output to PM. PM routes back to implementer.
-       Do NOT proceed to tester.
 
-  3. Dispatch tester:
-     "Verify the changes compile and run correctly. Component: <component>.
-      Build output: <build results file path>. Workspace: <workspace>."
-     - Handle output saving (tester writes own output)
+  3. Parse build-expert output for BUILD_DECISION:
 
-  4. Return tester output to the main loop (sent to PM for routing)
+     IF BUILD_DECISION is BUILT:
+       - If build FAILED: send build output to PM. PM routes back to implementer.
+         Do NOT proceed to tester.
+       - If build PASSED: dispatch tester:
+         "Verify the changes compile and run correctly. Component: <component>.
+          Build output: <build results file path>. Workspace: <workspace>."
+         - Handle output saving (tester writes own output)
+         - Set build_deferred = false
+         - Return tester output to the main loop (sent to PM for routing)
+
+     IF BUILD_DECISION is DEFERRED:
+       - Do NOT dispatch tester
+       - Set build_deferred = true
+       - Return build-expert analysis to the main loop (sent to PM for routing)
+       - PM should route to reviewer with context noting the build was deferred
+
+  4. (Shell scripts / non-compiled files only) Skip build, dispatch tester directly,
+     set build_deferred = false
 ```
 
-The PM is NOT consulted between commit → build → test. These three steps always run in sequence. The PM only gets control back after the tester finishes.
+When dispatching the reviewer and `build_deferred` is true, include in the reviewer's context:
+"Build was deferred — changes are non-functional only (comments/docs/formatting). Focus on spec compliance and code quality. Build verification is pending after review."
+
+**Post-review build (when `build_deferred` is true):**
+After the reviewer passes with a deferred build, the PM routes to build-expert for an actual build (not diff analysis). The session dispatches build-expert, then dispatches tester after a successful build, then returns results to PM for completion. If the reviewer rejects (partial/fail-spec/fail), changes go back up to experts/planner/implementer with no build wasted — `build_deferred` resets to false on the next commit.
 
 ### Bisect Inner Loop
 
