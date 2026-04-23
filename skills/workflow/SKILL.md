@@ -107,11 +107,22 @@ Starting agent: <starting_agent>
 
 **Step 4: Handle branch**
 
-If `branch_action` is `create-new`, dispatch the Git Agent:
+Branch creation is **deferred** for `bug` and `knowledge` tasks — these may conclude without code changes, so creating a branch upfront is wasteful. For `design` and `script` tasks, branches are created immediately since code changes are expected.
 
-```
-Agent(subagent_type: "git-agent", prompt: "Create and switch to branch <branch_name>. Working directory: <workspace>")
-```
+- If `branch_action` is `create-new` AND `classification` is `design` or `script`:
+  - Dispatch the Git Agent now:
+    ```
+    Agent(subagent_type: "git-agent", prompt: "Create and switch to branch <branch_name>. Working directory: <workspace>")
+    ```
+  - Set `branch_created = true`
+
+- If `branch_action` is `create-new` AND `classification` is `bug` or `knowledge`:
+  - Do NOT create the branch yet. Save `branch_name` for later.
+  - Set `branch_created = false`
+
+- If `branch_action` is `use-existing`:
+  - No action needed.
+  - Set `branch_created = true` (or N/A)
 
 ### Parsing PM Output — JSON Normalization
 
@@ -171,8 +182,10 @@ Classification — normalize to one of `design`, `bug`, `script`, `knowledge`:
 
 **Step 6: Apply starting agent override.** The PM sometimes skips analysis by routing directly to `planner` or `implementer`. The session enforces the full pipeline:
 - If `classification` is `design` or `bug` AND `starting_agent` is NOT `hip-expert` and NOT `troubleshooter`: override `starting_agent` to `hip-expert`.
-- If `classification` is `script` AND `starting_agent` is NOT `bash-expert`: override `starting_agent` to `bash-expert`.
+- If `classification` is `script` AND `starting_agent` is NOT `bash-expert` and NOT `tester`: override `starting_agent` to `bash-expert`.
 - `knowledge` tasks: no override (always `hip-expert` by convention, but no enforcement needed).
+
+**Step 7: Override workspace.** Always use the workspace path the session gathered in Step 1. Ignore the PM's `workspace` field — the PM sometimes appends `/therock` or modifies the path. The session's own value is authoritative.
 
 ### Phase 2: Main Dispatch Loop
 
@@ -203,6 +216,10 @@ LOOP:
        - CONTINUE LOOP
 
      IF type = "commit":
+       - If `branch_created` is false (deferred from Step 4):
+         - Dispatch Git Agent to create the branch first:
+           "Create and switch to branch <branch_name>. Working directory: <workspace>"
+         - Set `branch_created = true`
        - Dispatch Git Agent to commit specified files
        - Handle output saving for Git Agent
        - Run the Mandatory Post-Commit Sequence (see below)

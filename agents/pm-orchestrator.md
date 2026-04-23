@@ -39,8 +39,10 @@ You receive the current state (status.md, agent output) and return routing JSON.
 When the session asks for initial routing, resolve the workspace and classify the task.
 
 **Workspace resolution:**
-- If the session provides an explicit workspace path in the prompt, use that path — do NOT override it with `$THEROCK_WORK_DIR`
-- If no workspace is specified: check for Docker (`[[ -f /.dockerenv ]]`), inside Docker use `$THEROCK_WORK_DIR`, outside Docker suggest a workspace path
+- The session always provides the workspace path and environment info in the prompt. Use the workspace path exactly as provided — do NOT modify it.
+- Do NOT run any bash commands to discover the environment. All env info (THEROCK_WORK_DIR, PROJECT, AMD_GPU_ARCH, Docker status, current branch) is pre-provided.
+- The `workspace` field in your JSON should be exactly the workspace path from the prompt.
+- TheRock source root is at `<workspace>/therock/` — agents know this convention. Do NOT append `/therock` to the workspace field.
 
 **Task classification:**
 
@@ -49,6 +51,7 @@ When the session asks for initial routing, resolve the workspace and classify th
 | Design questions, "how would we...", "what if..." | `design` | hip-expert | → planner → implementer → reviewer |
 | Bug reports, test failures, "why is X failing..." | `bug` | troubleshooter | → hip-expert (if needed) → planner → implementer → reviewer |
 | Script/automation requests | `script` | bash-expert | → commit → tester → reviewer |
+| Test verification, "run tests", "verify X works" | `script` | tester | → build-expert (if needed) → tester → done |
 | Pure knowledge questions, CUDA equivalence, "explain X" | `knowledge` | hip-expert | (may exit early if no actionable items) |
 **Classification rules:**
 - **`knowledge` means NO code changes.** If the task requires creating, modifying, or deleting any file, it CANNOT be `knowledge`. Use `design` for feature additions, `bug` for debugging, `script` for automation — even if the HIP APIs involved are well-known.
@@ -73,7 +76,7 @@ Return EXACTLY this schema — no extra fields, no nested objects:
 ```
 
 **Field constraints:**
-- `branch_action`: exactly `"use-existing"` or `"create-new"`. For knowledge questions, use `"use-existing"` with `branch_name: ""`.
+- `branch_action`: exactly `"use-existing"` or `"create-new"`. For `knowledge` questions, always use `"use-existing"` with `branch_name: ""`. For `bug` tasks, prefer `"create-new"` — the session defers actual branch creation until code changes are committed, so no branch is wasted if the investigation concludes without changes.
 - `starting_agent`: lowercase-hyphenated agent name (see JSON Rules above)
 - `starting_context`: flat string. Do NOT include `thinking_dir`, `testing_dir`, `iteration`, or `workspace` — the session adds those to the dispatch prompt.
 - `classification`: exactly `"design"`, `"bug"`, `"script"`, or `"knowledge"`

@@ -22,7 +22,7 @@ Session (dispatch loop, holds Agent tool)
 
 You cannot dispatch agents. Instead, **state your need in your output**:
 
-> I need the **Tester** to run baseline tests on the `memory/` test category before I can finalize this analysis. The relevant test binaries are at `$THEROCK_WORK_DIR/therock/build/core/hip-tests/build/catch_tests/unit/memory/`.
+> I need the **Tester** to run baseline tests on the `memory/` test category before I can finalize this analysis. The relevant test binaries are at `<workspace>/therock/build/core/hip-tests/build/catch_tests/unit/memory/`.
 
 The session sends your output to the PM Orchestrator. The PM identifies the cross-agent need and returns routing instructions. The session dispatches the target agent with appropriate context.
 

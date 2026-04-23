@@ -46,7 +46,7 @@ This applies to ALL git operations including submodule work. For submodules at `
 
 ### TheRock (ROCm build super-project)
 - **Public:** `https://github.com/ROCm/TheRock`
-- Located at `$THEROCK_WORK_DIR/therock/` inside containers
+- Located at `<workspace>/therock/` inside containers (use the workspace path from your dispatch context)
 - Branch convention: `users/<username>/<short-description>`
 
 ### compute-utils (internal, LRT team scripts)
