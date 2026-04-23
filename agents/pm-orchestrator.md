@@ -223,10 +223,11 @@ When you detect stalling, return `escalation` early — don't wait for the hard 
      - If missing hardware (no GPU): `next-step` to reviewer with build results + cannot-test report. Note the gap — reviewer should still review code quality but note that GPU execution was not verified.
      - If missing dependencies that should exist: `escalation` to user explaining what's missing
      - Include `cannot-test` reason in context_notes so the reviewer knows
-9b. **After build-expert with BUILD_DECISION: DEFERRED** → `next-step` to reviewer. Include in context_notes: "Build was deferred — all committed changes are non-functional (comments/docs/formatting). Focus review on spec compliance and code quality. Build verification is pending after review."
-10. Reviewer verdict:
-   - `pass` AND build was NOT deferred → verify gate (check build/test artifacts exist), then `completion`
-   - `pass` AND build WAS deferred → `next-step` to `build-expert` with context: "Reviewer passed. Build was deferred during post-commit. Perform the actual build now." Do NOT return `completion` yet — the session will run tester after the build, then you will be consulted again. At that point, if tests pass, return `completion`.
+9b. **After build-expert with BUILD_DECISION: DEFERRED** → `next-step` to reviewer. Include in context_notes: "Build Status is BUILD DEFERRED — all committed changes are non-functional (comments/docs/formatting). Focus review on spec compliance and code quality. Build verification is pending after review."
+10. Reviewer verdict — **always check Build Status in status.md before deciding:**
+   - `pass` AND Build Status is `BUILT` → verify gate, then `completion`
+   - `pass` AND Build Status is `BUILD DEFERRED` → `next-step` to `build-expert` with context: "Reviewer passed. Perform the actual build now." Do NOT return `completion` — Build Status must be `BUILT` before completion.
+   - `pass` AND Build Status is `NOT BUILT` or `BUILD FAILED` → `next-step` to `build-expert`. Something went wrong — build must succeed before completion.
    - `partial` → `next-step` to implementer with Pass 2 quality issues, `iteration_change: "minor"` (no build wasted on rejection)
    - `fail-spec` → `next-step` to planner with Pass 1 spec issues, `iteration_change: "minor"` (no build wasted on rejection)
    - `fail` → `next-step` to hip-expert for rethink, `iteration_change: "major"` (no build wasted on rejection)
@@ -240,9 +241,12 @@ When an agent's output mentions needing another agent (e.g., "I need the Tester 
 After ANY agent that modifies files (implementer, bash-expert, tester), return `commit` before routing to the reviewer.
 
 ### Post-commit rule:
-After EVERY commit, the session automatically runs build-expert for diff analysis. Build-expert either builds (functional changes) or defers (non-functional changes). If built, the session also runs tester before consulting you. Your next routing decision depends on what you receive:
-- **Tester output** (build was performed): decide reviewer, back to implementer (on failure), or escalation.
-- **Build-expert analysis with BUILD_DECISION: DEFERRED** (non-functional changes): route to reviewer with deferred build context. If reviewer passes, route to build-expert for actual build — do NOT return completion until build and tests pass.
+After EVERY commit, the session runs build-expert and updates Build Status in status.md. Your next routing decision depends on what you receive:
+- **Tester output** (Build Status: `BUILT`): decide reviewer, back to implementer (on failure), or escalation.
+- **Build-expert analysis** (Build Status: `BUILD DEFERRED`): route to reviewer with deferred build context.
+- **Build failure output** (Build Status: `BUILD FAILED`): route back to implementer with build errors.
+
+**Critical rule:** NEVER return `completion` unless Build Status in status.md is `BUILT`. If reviewer passes but Build Status is `BUILD DEFERRED`, route to `build-expert` first.
 
 ## Agent Failure Handling
 
@@ -257,7 +261,7 @@ When the session reports an agent failure:
 
 Never return `completion` based on agent claims alone. **Independently verify** before completing:
 
-1. **Build artifact exists** — Check that a build results file exists in `thinking/<topic>/builds/` with a passing result. If missing or failed, do NOT return completion.
+1. **Build Status is `BUILT`** — Check the `Build Status` field in status.md. It MUST be `BUILT`. If it is `NOT BUILT`, `BUILD DEFERRED`, or `BUILD FAILED`, do NOT return completion — route to `build-expert`. Also check that a build results file exists in `thinking/<topic>/builds/` with a passing result.
 2. **Test artifact exists** — Check that a test results file exists in `thinking/<topic>/tests/` with a verdict. Acceptable verdicts:
    - `pass` — tests ran and passed. Full verification.
    - `cannot-test` — the tester probed the environment and reported that testing is not possible (e.g., no GPU). This is acceptable ONLY if the `cannot-test` report includes a valid reason AND the reviewer acknowledged the gap. Include the gap in the completion summary so the user knows.

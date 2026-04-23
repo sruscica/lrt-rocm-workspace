@@ -225,7 +225,7 @@ LOOP:
        - Dispatch Git Agent to commit specified files
        - Handle output saving for Git Agent
        - Run the Mandatory Post-Commit Sequence (see below)
-       - Send tester result to PM
+       - Send result to PM (tester output if built, build-expert analysis if deferred)
        - CONTINUE LOOP
 
      IF type = "completion":
@@ -392,33 +392,37 @@ POST-COMMIT:
       Component: <component>. Target: <target>. Workspace: <workspace>."
      - Handle output saving (Note-taker for build-expert)
 
-  3. Parse build-expert output for BUILD_DECISION:
+  3. Parse build-expert output for BUILD_DECISION and update Build Status in status.md:
 
-     IF BUILD_DECISION is BUILT:
-       - If build FAILED: send build output to PM. PM routes back to implementer.
-         Do NOT proceed to tester.
-       - If build PASSED: dispatch tester:
+     IF BUILD_DECISION is BUILT AND build PASSED:
+       - Update status.md: `Build Status: BUILT`
+       - Dispatch tester:
          "Verify the changes compile and run correctly. Component: <component>.
           Build output: <build results file path>. Workspace: <workspace>."
          - Handle output saving (tester writes own output)
-         - Set build_deferred = false
          - Return tester output to the main loop (sent to PM for routing)
 
+     IF BUILD_DECISION is BUILT AND build FAILED:
+       - Update status.md: `Build Status: BUILD FAILED`
+       - Do NOT proceed to tester
+       - Send build output to PM. PM routes back to implementer.
+
      IF BUILD_DECISION is DEFERRED:
+       - Update status.md: `Build Status: BUILD DEFERRED`
        - Do NOT dispatch tester
-       - Set build_deferred = true
        - Return build-expert analysis to the main loop (sent to PM for routing)
-       - PM should route to reviewer with context noting the build was deferred
+       - PM reads Build Status from status.md and routes to reviewer
 
   4. (Shell scripts / non-compiled files only) Skip build, dispatch tester directly,
-     set build_deferred = false
+     update status.md: `Build Status: BUILT` (no compilation needed for scripts)
 ```
 
-When dispatching the reviewer and `build_deferred` is true, include in the reviewer's context:
+When dispatching the reviewer and Build Status is `BUILD DEFERRED`, include in the reviewer's context:
 "Build was deferred — changes are non-functional only (comments/docs/formatting). Focus on spec compliance and code quality. Build verification is pending after review."
 
-**Post-review build (when `build_deferred` is true):**
-After the reviewer passes with a deferred build, the PM routes to build-expert for an actual build (not diff analysis). The session dispatches build-expert, then dispatches tester after a successful build, then returns results to PM for completion. If the reviewer rejects (partial/fail-spec/fail), changes go back up to experts/planner/implementer with no build wasted — `build_deferred` resets to false on the next commit.
+### Build Status Reset
+
+When the PM routes back to implementer, planner, or hip-expert after a reviewer rejection (partial/fail-spec/fail), the session MUST update status.md: `Build Status: NOT BUILT`. This ensures stale build state from a prior iteration cannot leak into the next one. The next commit triggers the post-commit sequence, which sets Build Status fresh.
 
 ### Bisect Inner Loop
 

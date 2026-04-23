@@ -125,12 +125,22 @@ topic: <topic-slug>
 created: <ISO 8601>
 current_stage: PM Orchestrator
 iteration: 1.0
+build_status: NOT BUILT
 ---
 
 ## Completed Stages
 
 ## Current Stage
 - [ ] PM Orchestrator — initializing pipeline
+
+## Build Status
+`NOT BUILT`
+
+Transitions (managed by session):
+- `NOT BUILT` → initial state, or reset after reviewer rejection
+- `BUILT` → build-expert compiled successfully
+- `BUILD DEFERRED` → build-expert determined all changes are non-functional
+- `BUILD FAILED` → build-expert attempted build, compilation failed
 
 ## Blockers
 
