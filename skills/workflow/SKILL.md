@@ -184,7 +184,7 @@ Classification — normalize to one of `design`, `bug`, `script`, `knowledge`:
 
 **Step 6: Apply starting agent override.** The PM sometimes skips analysis by routing directly to `planner` or `implementer`. The session enforces the full pipeline:
 - If `classification` is `design` or `bug` AND `starting_agent` is NOT `hip-expert` and NOT `troubleshooter`: override `starting_agent` to `hip-expert`.
-- If `classification` is `script` AND `starting_agent` is NOT `bash-expert` and NOT `tester`: override `starting_agent` to `bash-expert`.
+- If `classification` is `script` AND `starting_agent` is NOT `bash-expert` and NOT `tester` and NOT `build-expert`: override `starting_agent` to `bash-expert`. (`build-expert` is allowed only for pure build tasks — rebuilds, configure, clean — not for scripting or automation work.)
 - `knowledge` tasks: no override (always `hip-expert` by convention, but no enforcement needed).
 
 **Step 7: Override workspace.** Always use the workspace path the session gathered in Step 1. Ignore the PM's `workspace` field — the PM sometimes appends `/therock` or modifies the path. The session's own value is authoritative.

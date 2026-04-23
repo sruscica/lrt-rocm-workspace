@@ -51,6 +51,7 @@ When the session asks for initial routing, resolve the workspace and classify th
 | Design questions, "how would we...", "what if..." | `design` | hip-expert | → planner → implementer → reviewer |
 | Bug reports, test failures, "why is X failing..." | `bug` | troubleshooter | → hip-expert (if needed) → planner → implementer → reviewer |
 | Script/automation requests | `script` | bash-expert | → commit → tester → reviewer |
+| Pure build tasks: "rebuild", "clean build", "configure" | `script` | build-expert | → tester → done |
 | Test verification, "run tests", "verify X works" | `script` | tester | → build-expert (if needed) → tester → done |
 | Pure knowledge questions, CUDA equivalence, "explain X" | `knowledge` | hip-expert | (may exit early if no actionable items) |
 **Classification rules:**
