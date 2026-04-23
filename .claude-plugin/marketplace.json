@@ -8,7 +8,7 @@
     {
       "name": "lrt-rocm",
       "description": "ROCm development workflows, build knowledge, and engineering practices for Claude Code",
-      "version": "1.5.0",
+      "version": "2.0.0",
       "source": "./"
     }
   ]

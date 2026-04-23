@@ -43,7 +43,7 @@ git -C <workspace> rev-parse --abbrev-ref HEAD 2>/dev/null || echo "NO_BRANCH"
 Then dispatch the PM Orchestrator with all info pre-provided:
 
 ```
-Agent(subagent_type: "pm-orchestrator", prompt: """
+Agent(subagent_type: "lrt-rocm:pm-orchestrator", prompt: """
 ADVISOR MODE. You do NOT have the Agent tool.
 DO NOT run any Bash commands. All environment info is provided below.
 
@@ -88,7 +88,7 @@ If the user corrects anything, re-dispatch PM with the corrections.
 Dispatch the Note-taker to create the directory structure:
 
 ```
-Agent(subagent_type: "note-taker", prompt: """
+Agent(subagent_type: "lrt-rocm:note-taker", prompt: """
 Create the thinking directory at <workspace>/thinking/YYYY-MM-DD-<topic_slug>/ with:
 - status.md (use the initial template)
 - Subdirectories: analysis/, plans/, tests/, reviews/, investigations/, builds/, commits/, scripts/, pm-summaries/, requests/
@@ -102,7 +102,7 @@ Also create <workspace>/testing/YYYY-MM-DD-<topic_slug>/ for test artifacts.
 If `branch_action` is `create-new`, dispatch the Git Agent:
 
 ```
-Agent(subagent_type: "git-agent", prompt: "Create and switch to branch <branch_name>. Working directory: <workspace>")
+Agent(subagent_type: "lrt-rocm:git-agent", prompt: "Create and switch to branch <branch_name>. Working directory: <workspace>")
 ```
 
 ### Parsing PM Output — JSON Normalization
@@ -222,7 +222,7 @@ LOOP:
 Every specialist dispatch uses this pattern:
 
 ```
-Agent(subagent_type: "<agent-name>", prompt: """
+Agent(subagent_type: "lrt-rocm:<agent-name>", prompt: """
 You are the <agent-name> in the ROCm Agent Pipeline.
 You do NOT have the Agent tool. If you need another agent, state the need
 clearly in your output — which agent, what task, what files are relevant.
@@ -248,7 +248,7 @@ Continue your work incorporating those results.
 After every specialist finishes:
 
 ```
-Agent(subagent_type: "pm-orchestrator", prompt: """
+Agent(subagent_type: "lrt-rocm:pm-orchestrator", prompt: """
 ADVISOR MODE. Return ONLY a JSON block, no prose.
 
 Iteration: <iteration>
@@ -289,14 +289,14 @@ After a specialist finishes, check if they need Note-taker:
 - `implementer`, `tester`, `bash-expert`
 - These write their own output files. Only dispatch Note-taker for status.md:
   ```
-  Agent(subagent_type: "note-taker", prompt: "Update status.md at <path>: <status update details>")
+  Agent(subagent_type: "lrt-rocm:note-taker", prompt: "Update status.md at <path>: <status update details>")
   ```
 
 **Agents WITHOUT Write (need Note-taker for output):**
 - `hip-expert`, `planner`, `reviewer`, `troubleshooter`, `build-expert`, `git-agent`
 - Dispatch Note-taker to save their full output:
   ```
-  Agent(subagent_type: "note-taker", prompt: """
+  Agent(subagent_type: "lrt-rocm:note-taker", prompt: """
   Write the following content to <thinking_dir>/<subdir>/<iteration>-<agent>.md:
   ---
   agent: <agent-name>
@@ -406,7 +406,7 @@ If an agent dispatch fails (error, timeout, empty output):
 1. **Retry once** with the same prompt
 2. If retry fails, dispatch PM:
    ```
-   Agent(subagent_type: "pm-orchestrator", prompt: """
+   Agent(subagent_type: "lrt-rocm:pm-orchestrator", prompt: """
    ADVISOR MODE. Agent <name> failed twice. Error: <error>.
    What was it doing: <context>.
    Return JSON: escalation (ask user) or next-step (skip and continue).
