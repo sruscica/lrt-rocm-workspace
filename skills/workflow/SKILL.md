@@ -125,21 +125,40 @@ Branch creation is **deferred** for `bug` and `knowledge` tasks — these may co
 
 The Git Agent owns branch naming. It examines existing branches in the repo to determine the naming convention and creates a descriptive name for the task. The session provides the task summary — not a branch name.
 
+**4a. Determine branch base** (for `create-new` only):
+
+Determine the default base branch from the workspace path:
+
+| Workspace path contains | Default base branch |
+|-------------------------|---------------------|
+| `compute-utils`         | `amd/dev/lrt`       |
+| `rocm-systems`          | `develop`           |
+| (other)                 | `main`              |
+
+Present to the user:
+> Base branch: `<default>` (default for `<repo>`). Use this, or specify a different base?
+
+Store the confirmed value as `<branch_base>`. This is used for both branch creation
+and PR targeting (Phase 3 Step 3).
+
+**4b. Create or defer branch:**
+
 - If `branch_action` is `create-new` AND `classification` is `design` or `script`:
   - Dispatch the Git Agent now:
     ```
-    Agent(subagent_type: "git-agent", prompt: "Create a new branch for this task and switch to it. Examine existing branches to determine the repo's naming convention, then create a branch name that matches the convention and describes the task. Working directory: <workspace>. Task: <task_summary>. Username: <username>")
+    Agent(subagent_type: "git-agent", prompt: "Create a new branch for this task and switch to it. Examine existing branches to determine the repo's naming convention, then create a branch name that matches the convention and describes the task. Base the branch on origin/<branch_base>. Working directory: <workspace>. Task: <task_summary>. Username: <username>")
     ```
   - Save the branch name from the Git Agent's output
   - Set `branch_created = true`
 
 - If `branch_action` is `create-new` AND `classification` is `bug` or `knowledge`:
-  - Do NOT create the branch yet. Save `task_summary` and `username` for the deferred dispatch.
+  - Do NOT create the branch yet. Save `task_summary`, `username`, and `<branch_base>` for the deferred dispatch.
   - Set `branch_created = false`
 
 - If `branch_action` is `use-existing`:
   - No action needed.
   - Set `branch_created = true` (or N/A)
+  - Determine `<branch_base>` by checking the upstream tracking branch or using the lookup table above. Store for PR targeting.
 
 **Step 5: Record pipeline start commit**
 
@@ -260,8 +279,11 @@ LOOP:
              Log: "Session override: planner required before commit."
              CONTINUE LOOP
        - If `branch_created` is false (deferred from Step 4):
+         - If `<branch_base>` was not yet confirmed (bug/knowledge tasks where
+           Step 4a was skipped because branch was deferred), run Step 4a now:
+           determine default from lookup table, ask user to confirm or override.
          - Dispatch Git Agent to create the branch first:
-           "Create a new branch for this task and switch to it. Examine existing branches to determine the repo's naming convention, then create a branch name that matches the convention and describes the task. Working directory: <workspace>. Task: <task_summary>. Username: <username>"
+           "Create a new branch for this task and switch to it. Examine existing branches to determine the repo's naming convention, then create a branch name that matches the convention and describes the task. Base the branch on origin/<branch_base>. Working directory: <workspace>. Task: <task_summary>. Username: <username>"
          - Save the branch name from the Git Agent's output
          - Set `branch_created = true`
        - Dispatch Git Agent to commit specified files
@@ -678,15 +700,31 @@ If no: Done.
 If yes:
 
 ```
-3a. Gather commit log for PM context:
-    Run: git -C <workspace> log --oneline <base_commit>..HEAD
-    Save the output as <commit_log>.
+3a. Gather context for PM:
+    - Commit log: git -C <workspace> log --oneline <base_commit>..HEAD
+    - Test results: read the tester verdict from <thinking_dir>/tests/
+      (e.g., "15/15 tests passed" or "cannot-test: no GPU")
+    - Build status: read from status.md (BUILT, BUILD DEFERRED, etc.)
+    - Review verdict: read from <thinking_dir>/reviews/ (pass/partial/fail)
+    Save these as <commit_log>, <test_summary>, <build_summary>, <review_verdict>.
 
 3b. Dispatch PM to construct PR content:
     Agent(subagent_type: "pm-orchestrator", prompt: """
     ADVISOR MODE. Return ONLY a JSON block, no prose.
 
     Construct a PR title and body for the completed work.
+
+    RULES for the PR:
+    - Title: Capture the HIGH-LEVEL GOAL of the entire branch — what the
+      user set out to accomplish. NOT a commit message. Think "what does
+      this PR do for the project?" (under 70 chars)
+    - Summary: 2-4 bullets covering the key changes
+    - Test plan: Checklist of verification items. Pre-check (- [x]) any
+      item that the pipeline has already verified. Leave unchecked (- [ ])
+      items that still need manual verification.
+    - Verification: Brief summary of pipeline results (test count, build
+      status, review verdict). Reference the thinking directory for full
+      artifacts.
 
     Completion summary: <PM's completion summary from the completion response>
 
@@ -695,8 +733,14 @@ If yes:
     <commit_log>
     ---
 
+    Pipeline results:
+    - Tests: <test_summary>
+    - Build: <build_summary>
+    - Review: <review_verdict>
+    - Artifacts: <thinking_dir>/
+
     Respond with ONLY a JSON block:
-    {"type":"pr-content", "title":"<short PR title, under 70 chars>", "body":"<markdown body with ## Summary (2-4 bullets) and ## Test plan (checklist) sections>"}
+    {"type":"pr-content", "title":"<high-level PR title, under 70 chars>", "body":"<markdown body with ## Summary, ## Test plan (pre-checked items), and ## Verification sections>"}
     """)
 
     This is a content-construction dispatch, not a routing decision.
@@ -709,14 +753,14 @@ If yes:
     Working directory: <workspace>.
 
     1. Push: git push -u origin <branch_name>
-    2. Create PR with exactly this title and body:
+    2. Create PR targeting <branch_base> with exactly this title and body:
 
     Title: <title from PM>
 
     Body:
     <body from PM>
 
-    Use: gh pr create --title "..." --body "..."
+    Use: gh pr create --base <branch_base> --title "..." --body "..."
     Report the PR URL when done.
     """)
 

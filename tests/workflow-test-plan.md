@@ -434,6 +434,21 @@ Each test case is a mock prompt dispatched through the pipeline, with expected r
   - Expected: Session does NOT make direct edits. Feedback is sent to PM as a new task, Phase 2 re-entered, implementer makes changes, full post-commit sequence runs again.
   - Pass criteria: no session-level Edit/Write tool calls between user feedback and Phase 2 re-entry; implementer is dispatched for the change
 
+- [ ] **W-E19g**: Branch base confirmation — compute-utils defaults to amd/dev/lrt
+  - Prompt: Script task in compute-utils workspace
+  - Expected: Session presents "Base branch: `amd/dev/lrt` (default for compute-utils). Use this, or specify a different base?" before dispatching Git Agent. Git Agent dispatch includes "Base the branch on origin/amd/dev/lrt".
+  - Pass criteria: user prompted with correct default; Git Agent creates branch from amd/dev/lrt
+
+- [ ] **W-E19h**: Branch base override — user specifies release branch
+  - Prompt: Script task where user responds to base branch prompt with "release/therock-7.12"
+  - Expected: Session stores `release/therock-7.12` as branch_base. Git Agent dispatch includes "Base the branch on origin/release/therock-7.12". PR creation uses `--base release/therock-7.12`.
+  - Pass criteria: override is respected in both branch creation and PR targeting
+
+- [ ] **W-E19i**: PR targets correct base branch and has quality content
+  - Prompt: Any completed task going through Phase 3 Step 3
+  - Expected: PR created with `--base <branch_base>`, title reflects high-level goal (not commit message), test plan items pre-checked for pipeline-verified items, verification section present
+  - Pass criteria: gh pr create includes --base flag; PR body has [x] checked items; verification section references test results
+
 - [ ] **W-E20**: Verification gate — PM claims completion but artifacts missing
   - Prompt: Design task where PM returns `completion` but tests/ directory is empty
   - Expected: Phase 3 Step 0 verification fails
