@@ -85,14 +85,30 @@ If the user corrects anything, re-dispatch PM with the corrections.
 
 **Step 3: Create thinking directory**
 
-Create the directories yourself with a single mkdir command (NO brace expansion), then dispatch Note-taker for status.md only:
+First, determine where thinking/testing directories should go:
+
+```
+Set <artifact_base> = <workspace> (default)
+
+IF THEROCK_WORK_DIR is set AND <workspace> != THEROCK_WORK_DIR:
+  The code being changed is in a different location than the build working directory.
+  Ask the user:
+    "Code changes are in <workspace> but builds run in <THEROCK_WORK_DIR>.
+     Where should I put the thinking/testing directories?"
+    Options: <workspace>, <THEROCK_WORK_DIR>
+  Set <artifact_base> to the user's choice.
+```
+
+Then create the directories yourself with a single mkdir command (NO brace expansion), and dispatch Note-taker for status.md only:
 
 ```bash
 # Session runs this directly — NOT dispatched to an agent
 # IMPORTANT: Inline the full path. Do NOT use $VAR — it triggers expansion prompts.
-mkdir -p <workspace>/thinking/YYYY-MM-DD-<topic_slug>/analysis <workspace>/thinking/YYYY-MM-DD-<topic_slug>/plans <workspace>/thinking/YYYY-MM-DD-<topic_slug>/tests <workspace>/thinking/YYYY-MM-DD-<topic_slug>/reviews <workspace>/thinking/YYYY-MM-DD-<topic_slug>/investigations <workspace>/thinking/YYYY-MM-DD-<topic_slug>/builds <workspace>/thinking/YYYY-MM-DD-<topic_slug>/commits <workspace>/thinking/YYYY-MM-DD-<topic_slug>/scripts <workspace>/thinking/YYYY-MM-DD-<topic_slug>/pm-summaries <workspace>/thinking/YYYY-MM-DD-<topic_slug>/requests
-mkdir -p <workspace>/testing/YYYY-MM-DD-<topic_slug>
+mkdir -p <artifact_base>/thinking/YYYY-MM-DD-<topic_slug>/analysis <artifact_base>/thinking/YYYY-MM-DD-<topic_slug>/plans <artifact_base>/thinking/YYYY-MM-DD-<topic_slug>/tests <artifact_base>/thinking/YYYY-MM-DD-<topic_slug>/reviews <artifact_base>/thinking/YYYY-MM-DD-<topic_slug>/investigations <artifact_base>/thinking/YYYY-MM-DD-<topic_slug>/builds <artifact_base>/thinking/YYYY-MM-DD-<topic_slug>/commits <artifact_base>/thinking/YYYY-MM-DD-<topic_slug>/scripts <artifact_base>/thinking/YYYY-MM-DD-<topic_slug>/pm-summaries <artifact_base>/thinking/YYYY-MM-DD-<topic_slug>/requests
+mkdir -p <artifact_base>/testing/YYYY-MM-DD-<topic_slug>
 ```
+
+Use `<artifact_base>` (not `<workspace>`) for all thinking_dir and testing_dir references throughout the pipeline.
 
 Then dispatch Note-taker to write status.md only:
 
@@ -204,6 +220,11 @@ LOOP:
 
      IF type = "next-step":
        - Update iteration if PM says to (minor++ or major++)
+       - Apply Planner Gate (session enforcement):
+         IF next_agent = "implementer" AND no planner artifact exists in <thinking_dir>/plans/:
+           Override next_agent to "planner". Log: "Session override: planner required before implementer."
+         IF next_agent = "commit":
+           This is invalid as a next-step target. Treat as if PM returned type="commit" instead.
        - IF next_agent = "reviewer": run the Reviewer Gating Check (see below)
        - Set current agent = next_agent
        - Build context from PM's context_notes and pass_files
@@ -218,6 +239,12 @@ LOOP:
        - CONTINUE LOOP
 
      IF type = "commit":
+       - Apply Planner Gate (session enforcement):
+         IF classification is "design", "bug", or "script" (code-change tasks):
+           IF no planner artifact exists in <thinking_dir>/plans/:
+             Do NOT commit. Override: dispatch planner with expert analysis as context.
+             Log: "Session override: planner required before commit."
+             CONTINUE LOOP
        - If `branch_created` is false (deferred from Step 4):
          - Dispatch Git Agent to create the branch first:
            "Create and switch to branch <branch_name>. Working directory: <workspace>"
@@ -358,15 +385,21 @@ Before dispatching the reviewer (whether PM requested it or any other path), the
 ```
 REVIEWER-GATE (for design, bug, script tasks):
   1. Check <thinking_dir>/builds/ for a build results file
-     - If MISSING: dispatch build-expert first (use file-path → component mapping)
+     - EXCEPTION: If Build Status in status.md is "BUILT" AND all committed
+       files are non-compiled (shell scripts, .md, .txt, .yaml, .json, etc.),
+       the builds/ file check is waived. The post-commit sequence already
+       set Build Status to BUILT for non-compiled files — no build artifact
+       file is expected.
+     - If MISSING (and no exception applies): dispatch build-expert first
+       (use file-path → component mapping)
      - Handle output saving, then re-check
 
   2. Check <thinking_dir>/tests/ for a test results file
      - If MISSING: dispatch tester first
      - Handle output saving, then re-check
 
-  3. Only after BOTH exist: dispatch the reviewer
-     - Include build results file and test results file in pass_files
+  3. Only after BOTH checks pass: dispatch the reviewer
+     - Include build results file (if present) and test results file in pass_files
 ```
 
 For `knowledge` tasks: skip this check (no build/test expected).
@@ -516,14 +549,44 @@ If checks 1-3 fail (required artifacts missing or show failures):
 
 Ask: "Would you like to review the code changes before finalizing?"
 
-If yes:
-1. Dispatch Git Agent to snapshot and soft-reset (per its User Review Flow instructions)
-2. User reviews the staged diff
-3. Ask: "Happy with the changes?"
-   - **Yes:** Dispatch Git Agent to restore commits. Done.
-   - **No:** Get feedback. Dispatch Git Agent to restore. Send feedback to PM as a new task. Re-enter Phase 2 with fresh 3-cycle budget.
-
 If no: Done. Commits stay as-is.
+
+If yes, follow these steps exactly:
+
+```
+2a. Dispatch Git Agent for snapshot and soft-reset:
+    "Snapshot and soft-reset for user review.
+     Working directory: <workspace>. Topic: <topic_slug>."
+    The Git Agent writes pre-review-snapshot.md, then runs:
+      git reset --soft <base_commit>
+    This stages ALL pipeline changes as a single diff.
+
+2b. Present to user:
+    "Changes are staged for review. View in VS Code (staged changes)
+     or run `git diff --cached` in the terminal."
+    Wait for the user to finish reviewing.
+
+2c. Ask: "Happy with the changes, or do you have feedback?"
+
+2d. Dispatch Git Agent to restore commits (ALWAYS — whether user approves or rejects):
+    "Restore commits from snapshot.
+     Working directory: <workspace>. Topic: <topic_slug>."
+    The Git Agent cherry-picks all commits back in original order.
+
+2e. Act on user's answer:
+    - "Yes" / approved: Done.
+    - "No" / has feedback:
+      1. Record the user's feedback
+      2. Send feedback to PM as a new task
+      3. Re-enter Phase 2 with fresh 3-cycle budget
+      4. When Phase 2 completes and PM returns completion:
+         Re-enter Phase 3 from Step 0 (full verification + review offer again)
+```
+
+**IMPORTANT:** Phase 3 runs in full every time PM returns `completion`, including
+after feedback re-entry loops. The user always gets the opportunity to review changes.
+Step 2d (restore) MUST happen before re-entering Phase 2 — the commit stack must be
+intact for the implementer to build on.
 
 ## When to Use This vs. Other Skills
 

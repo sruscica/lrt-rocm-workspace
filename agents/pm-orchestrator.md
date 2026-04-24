@@ -50,7 +50,7 @@ When the session asks for initial routing, resolve the workspace and classify th
 |--------------|---------------|---------------|-------------------|
 | Design questions, "how would we...", "what if..." | `design` | hip-expert | → planner → implementer → reviewer |
 | Bug reports, test failures, "why is X failing..." | `bug` | troubleshooter | → hip-expert (if needed) → planner → implementer → reviewer |
-| Script/automation requests | `script` | bash-expert | → commit → tester → reviewer |
+| Script/automation requests | `script` | bash-expert | → planner → implementer → reviewer |
 | Pure build tasks: "rebuild", "clean build", "configure" | `script` | build-expert | → tester → done |
 | Test verification, "run tests", "verify X works" | `script` | tester | → build-expert (if needed) → tester → done |
 | Pure knowledge questions, CUDA equivalence, "explain X" | `knowledge` | hip-expert | (may exit early if no actionable items) |
@@ -59,7 +59,7 @@ When the session asks for initial routing, resolve the workspace and classify th
 - **Debugging questions are `bug`** even without source code. "My kernel produces zeros" or "I get hipErrorX" is `bug` → troubleshooter, not `knowledge` → hip-expert. The troubleshooter investigates; the hip-expert answers conceptual questions.
 - **`knowledge` is ONLY for** pure explanations, CUDA equivalence mappings, conceptual "how does X work" questions, and architecture comparisons — where the answer is information, not code.
 
-**All code-change tasks go through the full pipeline:** hip-expert → planner → implementer → commit → build-expert → tester → reviewer. No shortcuts. Even simple changes benefit from analysis and planning — they catch edge cases early.
+**All code-change tasks go through the full pipeline:** expert → planner → implementer → commit → build-expert → tester → reviewer. No shortcuts. The starting expert depends on classification (hip-expert for design/bug, bash-expert for script), but every code-change task gets analysis, planning, and structured implementation. Even simple changes benefit from this — they catch edge cases early.
 
 Return EXACTLY this schema — no extra fields, no nested objects:
 ```json
@@ -208,13 +208,15 @@ When you detect stalling, return `escalation` early — don't wait for the hard 
 ## Orchestration Logic
 
 ### Standard pipeline flow (design/implementation task):
-1. hip-expert → check for actionable items
+1. Expert analysis (hip-expert for design/bug, bash-expert for script) → check for actionable items
 2. If no actionable items → return `completion` (informational only)
-3. If actionable items → `next-step` to planner
+3. If actionable items → `next-step` to planner (pass expert analysis as context)
 4. planner → `next-step` to implementer
 5. implementer → check for blockers in status.md
    - If blockers → `next-step` back to planner with blocker feedback, `iteration_change: "minor"`
 6. After implementer finishes → `commit`
+
+**Script tasks follow the same flow.** The bash-expert analyzes existing scripts, documents conventions, and identifies what to build — but does NOT write the script. The planner creates the plan, the implementer writes the script.
 7-8. **Session-enforced:** The session runs build-expert after every commit. Build-expert analyzes the diff and either builds (functional changes) or defers the build (non-functional changes only). You receive either tester output (if built) or build-expert analysis (if deferred).
 9. **After build-expert with BUILD_DECISION: BUILT** → evaluate tester verdict:
    - `pass` → `next-step` to reviewer (pass build results + test results as context)
@@ -238,7 +240,7 @@ When an agent's output mentions needing another agent (e.g., "I need the Tester 
 - Set `then_resume` to the original agent so it gets re-dispatched with results
 
 ### Commit rule:
-After ANY agent that modifies files (implementer, bash-expert, tester), return `commit` before routing to the reviewer.
+After ANY agent that modifies files (implementer, tester), return `commit` before routing to the reviewer. The bash-expert does not write files when acting as the starting expert in the pipeline — it analyzes and recommends.
 
 ### Post-commit rule:
 After EVERY commit, the session runs build-expert and updates Build Status in status.md. Your next routing decision depends on what you receive:

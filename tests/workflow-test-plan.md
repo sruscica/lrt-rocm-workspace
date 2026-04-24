@@ -108,6 +108,7 @@ Each test case is a mock prompt dispatched through the pipeline, with expected r
   - Prompt: `Do a clean HIP runtime build for gfx1030`
   - Expected classification: `script`
   - Expected starting agent: `bash-expert`
+  - Expected pipeline: bash-expert (analysis) → planner → implementer → commit → tester → reviewer
   - Pass criteria: build-expert uses correct cmake flags, THEROCK_AMDGPU_TARGETS=gfx1030, full build targets
   - Permission check: no `${AMD_GPU_ARCH}` — literal `gfx1030`
 
@@ -115,12 +116,14 @@ Each test case is a mock prompt dispatched through the pipeline, with expected r
   - Prompt: `I changed a file in rocm-systems/projects/clr/. Rebuild only what's needed.`
   - Expected classification: `script`
   - Expected starting agent: `bash-expert`
+  - Expected pipeline: bash-expert (analysis) → planner → implementer → commit → tester → reviewer
   - Pass criteria: build-expert uses `ninja -C build hip-clr+build` (not full rebuild), source path → target mapping correct
 
 - [ ] **W-B3**: Incremental rebuild of tests only
   - Prompt: `Rebuild hip-tests after modifying a test file`
   - Expected classification: `script`
   - Expected starting agent: `bash-expert`
+  - Expected pipeline: bash-expert (analysis) → planner → implementer → commit → tester → reviewer
   - Pass criteria: uses `ninja -C build hip-tests+build`, does not rebuild clr or other components
 
 ### 2.2 Build Failures and Diagnostics
@@ -405,6 +408,11 @@ Each test case is a mock prompt dispatched through the pipeline, with expected r
   - Prompt: Design task where PM routes to reviewer but no build results exist
   - Expected: session's reviewer gating check catches missing build
   - Pass criteria: build-expert dispatched before reviewer; reviewer only runs after build+test artifacts exist
+
+- [ ] **W-E19b**: Reviewer gating check — shell script exception
+  - Prompt: Script task where committed files are all shell scripts, Build Status is BUILT (from post-commit step 4)
+  - Expected: reviewer gating waives the builds/ file check since non-compiled files don't produce build artifacts
+  - Pass criteria: reviewer dispatched without a build results file; test results file still required
 
 - [ ] **W-E20**: Verification gate — PM claims completion but artifacts missing
   - Prompt: Design task where PM returns `completion` but tests/ directory is empty
