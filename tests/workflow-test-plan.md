@@ -449,12 +449,34 @@ Each test case is a mock prompt dispatched through the pipeline, with expected r
   - Expected: PR created with `--base <branch_base>`, title reflects high-level goal (not commit message), test plan items pre-checked for pipeline-verified items, verification section present
   - Pass criteria: gh pr create includes --base flag; PR body has [x] checked items; verification section references test results
 
+### 5.5 PR Feedback Skill
+
+- [ ] **W-F1**: PR feedback expert assessment — correct classification
+  - Setup: Dispatch hip-expert with 3 mock PR review comments: one bug (actionable), one praise (informational), one design question (discussion)
+  - Expected: Expert classifies each correctly with reasoning and suggested fix for actionable items
+  - Pass criteria: Bug comment → actionable with fix suggestion; praise → informational; design question → discussion
+
+- [ ] **W-F2**: PR feedback → workflow transition
+  - Setup: After expert assessment with actionable items, user says "yes" to addressing them
+  - Expected: pr-feedback skill constructs task description from actionable items and invokes `/workflow` via Skill tool
+  - Pass criteria: Task description includes file paths, line numbers, and fix summaries; workflow skill is invoked with the constructed prompt
+
+- [ ] **W-F3**: PR feedback expert selection — bash-expert for shell scripts
+  - Setup: PR comments on `.sh` files and Dockerfiles only
+  - Expected: Session selects bash-expert instead of hip-expert for assessment
+  - Pass criteria: bash-expert is dispatched (not hip-expert)
+
+- [ ] **W-F4**: PR feedback — no comments found
+  - Setup: PR with no review comments (both gh api calls return empty arrays)
+  - Expected: Skill reports "No review comments found" and stops
+  - Pass criteria: No expert dispatch; user sees informational message
+
 - [ ] **W-E20**: Verification gate — PM claims completion but artifacts missing
   - Prompt: Design task where PM returns `completion` but tests/ directory is empty
   - Expected: Phase 3 Step 0 verification fails
   - Pass criteria: session re-dispatches PM with "Verification gate failed. Missing: test results." — does NOT present completion to user
 
-### 5.5 Permission Prompt Compliance
+### 5.6 Permission Prompt Compliance
 
 - [ ] **W-E21**: Tester uses no forbidden bash patterns
   - Prompt: Any test execution task
