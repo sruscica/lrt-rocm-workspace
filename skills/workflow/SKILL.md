@@ -141,6 +141,14 @@ The Git Agent owns branch naming. It examines existing branches in the repo to d
   - No action needed.
   - Set `branch_created = true` (or N/A)
 
+**Step 5: Record pipeline start commit**
+
+Record the repo state before any pipeline code changes:
+```
+pipeline_start_commit = git -C <workspace> rev-parse HEAD
+```
+Store this value for use in Phase 3 (review scope selection).
+
 ### Parsing PM Output — JSON Normalization
 
 The PM often returns non-compliant JSON. The session MUST normalize PM output before acting on it. Follow these steps every time you receive PM output:
@@ -567,12 +575,38 @@ If no: Go to Step 3.
 If yes, follow these steps exactly:
 
 ```
+2-scope. Determine review scope:
+
+    Check if this pipeline made commits:
+      git -C <workspace> rev-list --count <pipeline_start_commit>..HEAD
+    If 0 → no commits to review. Skip Step 2, go to Step 3.
+
+    IF branch_action was "use-existing":
+      Present scope options to the user:
+      - "This task's changes (<task_summary>)" — reviews only commits
+        made during this pipeline run
+      - "All branch changes" — reviews everything on the branch
+
+      Set <review_base> based on user's choice:
+      - This task → <review_base> = <pipeline_start_commit>
+      - All branch → <review_base> = "branch fork point"
+        (Git Agent determines the branch fork point)
+
+    IF branch_action was "create-new":
+      All commits are from this pipeline run. No scope question needed.
+      Set <review_base> = "branch fork point"
+
 2a. Dispatch Git Agent for snapshot and soft-reset:
     "Snapshot and soft-reset for user review.
-     Working directory: <workspace>. Topic: <topic_slug>."
-    The Git Agent writes pre-review-snapshot.md, then runs:
-      git reset --soft <base_commit>
-    This stages ALL pipeline changes as a single diff.
+     Working directory: <workspace>. Topic: <topic_slug>.
+     Reset to: <review_base>."
+    The Git Agent writes pre-review-snapshot.md (recording ALL commits
+    on the branch for later restore, regardless of review scope), then runs:
+      git reset --soft <review_base>
+    This stages the selected scope of changes as a diff.
+
+    When <review_base> is "branch fork point", the Git Agent determines
+    the appropriate base commit from the branch history.
 
 2b. Present to user:
     "Changes are staged for review. View in VS Code (staged changes)

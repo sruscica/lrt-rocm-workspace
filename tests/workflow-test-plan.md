@@ -414,6 +414,16 @@ Each test case is a mock prompt dispatched through the pipeline, with expected r
   - Expected: reviewer gating waives the builds/ file check since non-compiled files don't produce build artifacts
   - Pass criteria: reviewer dispatched without a build results file; test results file still required
 
+- [ ] **W-E19c**: Review scope selection — use-existing branch with pre-existing commits
+  - Prompt: Script task on an existing branch that already has commits from a prior pipeline run
+  - Expected: Phase 3 Step 2-scope presents scope options ("This task's changes" vs "All branch changes") before dispatching Git Agent for soft-reset. Git Agent receives explicit review_base.
+  - Pass criteria: (1) session records pipeline_start_commit in Phase 1, (2) scope question is presented when branch_action is use-existing, (3) Git Agent soft-resets to the user's chosen base (pipeline_start_commit for task-scope, branch fork point for all-branch), (4) snapshot still records ALL commits for restore regardless of scope
+
+- [ ] **W-E19d**: Review scope selection — create-new branch (no scope question)
+  - Prompt: Design task that creates a new branch
+  - Expected: Phase 3 Step 2 does NOT ask scope question — all commits are from this run. Proceeds directly to soft-reset with branch fork point as base.
+  - Pass criteria: no scope question asked; review stages all commits
+
 - [ ] **W-E20**: Verification gate — PM claims completion but artifacts missing
   - Prompt: Design task where PM returns `completion` but tests/ directory is empty
   - Expected: Phase 3 Step 0 verification fails
