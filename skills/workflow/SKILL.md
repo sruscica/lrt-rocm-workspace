@@ -293,6 +293,7 @@ COMMAND RULES (mandatory — violations prompt the user for approval):
 - NEVER use for/while loops with `$VAR` → spell out each command individually
 - NEVER use Catch2 `~[tag]` filter → list specific test names instead (triggers zsh syntax detection)
 - NEVER use `[[ -f /.dockerenv ]] && ...` with variable expansion in the same command
+- NEVER write plans, analysis, reports, or intermediate artifacts into the workspace — only code deliverables go there. All other output goes under `<thinking_dir>`.
 
 Workspace: <workspace>
 Thinking directory: <thinking_dir>
