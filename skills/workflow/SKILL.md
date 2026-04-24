@@ -254,7 +254,7 @@ LOOP:
        - Dispatch Git Agent to commit specified files
        - Handle output saving for Git Agent
        - Run the Mandatory Post-Commit Sequence (see below)
-       - Send result to PM (tester output if built, build-expert analysis if deferred)
+       - Send result to PM (reviewer output if tester passed, tester output if tester failed, build-expert analysis if deferred)
        - CONTINUE LOOP
 
      IF type = "completion":
@@ -436,7 +436,8 @@ POST-COMMIT:
          "Verify the changes compile and run correctly. Component: <component>.
           Build output: <build results file path>. Workspace: <workspace>."
          - Handle output saving (tester writes own output)
-         - Return tester output to the main loop (sent to PM for routing)
+         - If tester verdict is `pass`: run the Reviewer Gating Check and dispatch reviewer directly (skip PM — this transition is deterministic)
+         - If tester verdict is `fail` or `cannot-test`: return tester output to the main loop (sent to PM for routing)
 
      IF BUILD_DECISION is BUILT AND build FAILED:
        - Update status.md: `Build Status: BUILD FAILED`
@@ -451,6 +452,8 @@ POST-COMMIT:
 
   4. (Shell scripts / non-compiled files only) Skip build, dispatch tester directly,
      update status.md: `Build Status: BUILT` (no compilation needed for scripts)
+     - If tester verdict is `pass`: run the Reviewer Gating Check and dispatch reviewer directly (skip PM)
+     - If tester verdict is `fail` or `cannot-test`: return tester output to the main loop (sent to PM for routing)
 ```
 
 When dispatching the reviewer and Build Status is `BUILD DEFERRED`, include in the reviewer's context:
