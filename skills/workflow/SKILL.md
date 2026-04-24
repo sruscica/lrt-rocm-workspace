@@ -265,10 +265,16 @@ LOOP:
          - Save the branch name from the Git Agent's output
          - Set `branch_created = true`
        - Dispatch Git Agent to commit specified files
-       - Handle output saving for Git Agent
+       - Handle output saving for Git Agent (must include the commit hash)
+       - Dispatch Note-taker to update status.md Commits table with the new hash
        - Run the Mandatory Post-Commit Sequence (see below)
        - Send result to PM (reviewer output if tester passed, tester output if tester failed, build-expert analysis if deferred)
        - CONTINUE LOOP
+
+     **Commit hash maintenance:** Whenever a commit hash changes (amend,
+     recommit after soft-reset, cherry-pick restore), the session MUST
+     dispatch Note-taker to update the Commits table in status.md with
+     the new hash. Stale hashes make status.md unreliable for debugging.
 
      IF type = "completion":
        - Go to Phase 3 (Completion Flow)
@@ -422,51 +428,69 @@ For `knowledge` tasks: skip this check (no build/test expected).
 
 ### Mandatory Post-Commit Sequence
 
-After every `commit` action (for `design`, `bug`, or `script` tasks), the session MUST run the build-expert for diff analysis. The build-expert decides whether to build immediately or defer the build until after the reviewer passes.
+After every `commit` action (for `design`, `bug`, or `script` tasks), the session MUST classify the committed files and follow the appropriate path.
 
 ```
 POST-COMMIT:
-  1. Determine the build component from the committed files:
-     - Files under rocm-systems/projects/hip-tests/ → "hip-tests+build"
-     - Files under rocm-systems/projects/clr/ or core/clr/ → "hip-clr+build"
-     - Files under rocm-systems/projects/ocl-clr/ → "ocl-clr+build"
-     - Standalone .hip/.cpp files (not in TheRock tree) → compile with hipcc directly
-     - Shell scripts or non-compiled files → SKIP build-expert entirely, go to step 4
+  1. Classify committed files:
 
-  2. Dispatch build-expert (diff analysis + conditional build):
-     "Post-commit dispatch. Analyze the committed diff first. If ALL changes are
-      non-functional (comments, docs, whitespace, log strings, .md/.txt files),
-      report BUILD_DECISION: DEFERRED and skip building. If ANY changes are functional,
-      build incrementally and report BUILD_DECISION: BUILT.
-      Component: <component>. Target: <target>. Workspace: <workspace>."
-     - Handle output saving (Note-taker for build-expert)
+     Non-compiled: shell scripts (.sh), Dockerfiles, .md, .txt, .yaml,
+       .json, .toml, config files, documentation
+     Compiled: .cpp, .hip, .c, .h, .hpp, CMakeLists.txt, .cmake,
+       Python with C extensions
 
-  3. Parse build-expert output for BUILD_DECISION and update Build Status in status.md:
+     IF ALL committed files are non-compiled:
+       → Follow the NON-COMPILED PATH below
+     IF ANY committed file is compiled:
+       → Follow the COMPILED PATH below
 
-     IF BUILD_DECISION is BUILT AND build PASSED:
-       - Update status.md: `Build Status: BUILT`
-       - Dispatch tester:
-         "Verify the changes compile and run correctly. Component: <component>.
-          Build output: <build results file path>. Workspace: <workspace>."
-         - Handle output saving (tester writes own output)
-         - If tester verdict is `pass`: run the Reviewer Gating Check and dispatch reviewer directly (skip PM — this transition is deterministic)
-         - If tester verdict is `fail` or `cannot-test`: return tester output to the main loop (sent to PM for routing)
+  NON-COMPILED PATH:
+     a. Update status.md: `Build Status: BUILT` (no compilation needed)
+     b. Dispatch tester directly (no build-expert needed):
+        "Verify the script/config changes. Workspace: <workspace>."
+        - Handle output saving (tester writes own output)
+     c. If tester verdict is `pass`:
+        Run the Reviewer Gating Check and dispatch reviewer directly
+        (skip PM — this transition is deterministic)
+     d. If tester verdict is `fail` or `cannot-test`:
+        Return tester output to the main loop (sent to PM for routing)
 
-     IF BUILD_DECISION is BUILT AND build FAILED:
-       - Update status.md: `Build Status: BUILD FAILED`
-       - Do NOT proceed to tester
-       - Send build output to PM. PM routes back to implementer.
+  COMPILED PATH:
+     a. Determine the build component from the committed files:
+        - Files under rocm-systems/projects/hip-tests/ → "hip-tests+build"
+        - Files under rocm-systems/projects/clr/ or core/clr/ → "hip-clr+build"
+        - Files under rocm-systems/projects/ocl-clr/ → "ocl-clr+build"
+        - Standalone .hip/.cpp files (not in TheRock tree) → compile with hipcc directly
 
-     IF BUILD_DECISION is DEFERRED:
-       - Update status.md: `Build Status: BUILD DEFERRED`
-       - Do NOT dispatch tester
-       - Return build-expert analysis to the main loop (sent to PM for routing)
-       - PM reads Build Status from status.md and routes to reviewer
+     b. Dispatch build-expert (diff analysis + conditional build):
+        "Post-commit dispatch. Analyze the committed diff first. If ALL changes are
+         non-functional (comments, docs, whitespace, log strings, .md/.txt files),
+         report BUILD_DECISION: DEFERRED and skip building. If ANY changes are functional,
+         build incrementally and report BUILD_DECISION: BUILT.
+         Component: <component>. Target: <target>. Workspace: <workspace>."
+        - Handle output saving (Note-taker for build-expert)
 
-  4. (Shell scripts / non-compiled files only) Skip build, dispatch tester directly,
-     update status.md: `Build Status: BUILT` (no compilation needed for scripts)
-     - If tester verdict is `pass`: run the Reviewer Gating Check and dispatch reviewer directly (skip PM)
-     - If tester verdict is `fail` or `cannot-test`: return tester output to the main loop (sent to PM for routing)
+     c. Parse build-expert output for BUILD_DECISION and update Build Status:
+
+        IF BUILD_DECISION is BUILT AND build PASSED:
+          - Update status.md: `Build Status: BUILT`
+          - Dispatch tester:
+            "Verify the changes compile and run correctly. Component: <component>.
+             Build output: <build results file path>. Workspace: <workspace>."
+            - Handle output saving (tester writes own output)
+            - If tester verdict is `pass`: run the Reviewer Gating Check and dispatch reviewer directly (skip PM — this transition is deterministic)
+            - If tester verdict is `fail` or `cannot-test`: return tester output to the main loop (sent to PM for routing)
+
+        IF BUILD_DECISION is BUILT AND build FAILED:
+          - Update status.md: `Build Status: BUILD FAILED`
+          - Do NOT proceed to tester
+          - Send build output to PM. PM routes back to implementer.
+
+        IF BUILD_DECISION is DEFERRED:
+          - Update status.md: `Build Status: BUILD DEFERRED`
+          - Do NOT dispatch tester
+          - Return build-expert analysis to the main loop (sent to PM for routing)
+          - PM reads Build Status from status.md and routes to reviewer
 ```
 
 When dispatching the reviewer and Build Status is `BUILD DEFERRED`, include in the reviewer's context:
@@ -574,6 +598,12 @@ If no: Go to Step 3.
 
 If yes, follow these steps exactly:
 
+**SESSION ENFORCEMENT: No direct edits during review.** The session MUST NOT
+make code changes itself in response to user feedback — even for "simple"
+requests like "move this to a shared function" or "add a blank line." All
+feedback must re-enter Phase 2 via Step 2e. Direct edits bypass testing and
+review, which is exactly what the pipeline exists to prevent.
+
 ```
 2-scope. Determine review scope:
 
@@ -619,6 +649,8 @@ If yes, follow these steps exactly:
     "Restore commits from snapshot.
      Working directory: <workspace>. Topic: <topic_slug>."
     The Git Agent cherry-picks all commits back in original order.
+    If restored commit hashes differ from originals, dispatch Note-taker
+    to update the Commits table in status.md.
 
 2e. Act on user's answer:
     - "Yes" / approved: Go to Step 3.

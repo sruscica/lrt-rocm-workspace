@@ -424,6 +424,16 @@ Each test case is a mock prompt dispatched through the pipeline, with expected r
   - Expected: Phase 3 Step 2 does NOT ask scope question — all commits are from this run. Proceeds directly to soft-reset with branch fork point as base.
   - Pass criteria: no scope question asked; review stages all commits
 
+- [ ] **W-E19e**: Post-commit non-compiled path — skips build-expert
+  - Prompt: Script task that commits only shell scripts and Dockerfiles
+  - Expected: Post-commit sequence classifies files as non-compiled, follows NON-COMPILED PATH (sets Build Status BUILT, dispatches tester directly, then reviewer on pass). Build-expert is NOT dispatched.
+  - Pass criteria: no build-expert dispatch in agent activity log; Build Status is BUILT (not BUILD DEFERRED); tester and reviewer both dispatched
+
+- [ ] **W-E19f**: Review feedback routes through pipeline (no direct edits)
+  - Prompt: Any task where user provides feedback during Phase 3 Step 2 review (e.g., "move this to a shared function")
+  - Expected: Session does NOT make direct edits. Feedback is sent to PM as a new task, Phase 2 re-entered, implementer makes changes, full post-commit sequence runs again.
+  - Pass criteria: no session-level Edit/Write tool calls between user feedback and Phase 2 re-entry; implementer is dispatched for the change
+
 - [ ] **W-E20**: Verification gate — PM claims completion but artifacts missing
   - Prompt: Design task where PM returns `completion` but tests/ directory is empty
   - Expected: Phase 3 Step 0 verification fails
