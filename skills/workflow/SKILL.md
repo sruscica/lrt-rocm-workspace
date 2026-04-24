@@ -208,7 +208,7 @@ Classification — normalize to one of `design`, `bug`, `script`, `knowledge`:
 
 ### Phase 2: Main Dispatch Loop
 
-Set `iteration = "1.0"`, `major = 1`, `minor = 0`.
+Set `iteration = "1.0"`, `major = 1`, `minor = 0`, `previous_agent = ""`.
 
 **Dispatch the starting agent and enter the loop:**
 
@@ -220,7 +220,12 @@ LOOP:
   4. Parse PM response and act on it:
 
      IF type = "next-step":
-       - Update iteration if PM says to (minor++ or major++)
+       - Update iteration (session enforcement):
+         IF PM says iteration_change = "major": major++, minor = 0
+         ELSE IF next_agent != previous_agent: minor++
+         (Same-agent re-dispatches do not increment)
+         Update iteration string = "major.minor"
+         Set previous_agent = next_agent
        - Apply Planner Gate (session enforcement):
          IF next_agent = "implementer" AND no planner artifact exists in <thinking_dir>/plans/:
            Override next_agent to "planner". Log: "Session override: planner required before implementer."
