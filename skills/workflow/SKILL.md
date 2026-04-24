@@ -91,13 +91,10 @@ First, determine where thinking/testing directories should go:
 ```
 Set <artifact_base> = <workspace> (default)
 
-IF THEROCK_WORK_DIR is set AND <workspace> != THEROCK_WORK_DIR:
-  The code being changed is in a different location than the build working directory.
-  Ask the user:
-    "Code changes are in <workspace> but builds run in <THEROCK_WORK_DIR>.
-     Where should I put the thinking/testing directories?"
-    Options: <workspace>, <THEROCK_WORK_DIR>
-  Set <artifact_base> to the user's choice.
+IF inside Docker AND THEROCK_WORK_DIR is set:
+  Set <artifact_base> = THEROCK_WORK_DIR
+  (Thinking/testing artifacts always go in the work directory inside containers,
+   even when code changes target a different workspace.)
 ```
 
 Then create the directories yourself with a single mkdir command (NO brace expansion), and dispatch Note-taker for status.md only:
