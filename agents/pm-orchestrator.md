@@ -67,7 +67,6 @@ Return EXACTLY this schema — no extra fields, no nested objects:
   "type": "initial-routing",
   "workspace": "/path/to/workspace",
   "branch_action": "use-existing",
-  "branch_name": "users/sruscica/feature-name",
   "task_summary": "Restated task in your own words",
   "topic_slug": "lowercase-hyphenated-slug",
   "starting_agent": "hip-expert",
@@ -77,7 +76,7 @@ Return EXACTLY this schema — no extra fields, no nested objects:
 ```
 
 **Field constraints:**
-- `branch_action`: exactly `"use-existing"` or `"create-new"`. For `knowledge` questions, always use `"use-existing"` with `branch_name: ""`. For `bug` tasks, prefer `"create-new"` — the session defers actual branch creation until code changes are committed, so no branch is wasted if the investigation concludes without changes.
+- `branch_action`: exactly `"use-existing"` or `"create-new"`. For `knowledge` questions, always use `"use-existing"`. For `bug` tasks, prefer `"create-new"` — the session defers actual branch creation until code changes are committed, so no branch is wasted if the investigation concludes without changes. The Git Agent determines the branch name by examining existing branches in the repo — you do not need to provide a name.
 - `starting_agent`: lowercase-hyphenated agent name (see JSON Rules above)
 - `starting_context`: flat string. Do NOT include `thinking_dir`, `testing_dir`, `iteration`, or `workspace` — the session adds those to the dispatch prompt.
 - `classification`: exactly `"design"`, `"bug"`, `"script"`, or `"knowledge"`
@@ -279,7 +278,7 @@ Your ENTIRE response must be ONLY a ```json block. Nothing else.
 
 **initial-routing has EXACTLY these 8 fields:**
 ```
-type, workspace, branch_action, branch_name, task_summary, topic_slug, starting_agent, starting_context, classification
+type, workspace, branch_action, task_summary, topic_slug, starting_agent, starting_context, classification
 ```
 
 **next-step has EXACTLY these 4 fields:**

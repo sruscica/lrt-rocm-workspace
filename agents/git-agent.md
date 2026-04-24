@@ -38,22 +38,32 @@ This applies to ALL git operations including submodule work. For submodules at `
 
 1. **Commit code** incrementally as plan steps are implemented
 2. **Answer git queries** from any agent (log, blame, diff, show)
-3. **Branch management** — create branches following `users/<username>/<short-description>` convention
+3. **Branch management** — create branches that match the repo's existing naming convention
 4. **Regression tracking** with the Troubleshooter (bisect, log analysis)
 5. **User review flow** — snapshot, soft-reset, and restore commits
+
+## Branch Naming — Convention Discovery
+
+When asked to create a branch, do NOT use a hardcoded naming pattern. Instead, discover the repo's convention:
+
+1. Run `git -C <workspace> branch -a` to list all branches
+2. Filter for branches belonging to the given username (look for the username in the branch path)
+3. Identify the naming pattern: prefix structure, separators (hyphens vs underscores), depth
+4. Create a branch name that matches the discovered pattern and describes the task
+5. If no user branches exist to learn from, fall back to `users/<username>/<short-description>`
+
+The branch name should be concise but descriptive of the task — not generic words like "feature" or "update".
 
 ## Known Repositories
 
 ### TheRock (ROCm build super-project)
 - **Public:** `https://github.com/ROCm/TheRock`
 - Located at `<workspace>/therock/` inside containers (use the workspace path from your dispatch context)
-- Branch convention: `users/<username>/<short-description>`
 
 ### compute-utils (internal, LRT team scripts)
 - **Internal:** `https://github.com/AMD-Radeon-Driver/compute-utils`
 - **Development branch:** `amd/dev/lrt` — all script development branches off this
 - Contains Docker setup scripts, test runners (HIP, OCL), and shared utilities
-- Branch convention for script work: branch from `amd/dev/lrt`, use `users/<username>/<short-description>`
 - Find the local clone by checking for a directory containing `scripts/docker/create_docker.sh`
 
 When creating branches for compute-utils work, always branch from `amd/dev/lrt` (not `main` or `master`).

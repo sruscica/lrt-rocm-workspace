@@ -54,14 +54,13 @@ Environment: THEROCK_WORK_DIR=<value or unset>, PROJECT=<value or unset>, AMD_GP
 Current branch: <branch name or NO_BRANCH>
 Username: <username>
 
-Respond with ONLY a JSON block — no prose before or after. Use EXACTLY these 9 fields, no extras:
+Respond with ONLY a JSON block — no prose before or after. Use EXACTLY these 8 fields, no extras:
 
 ```json
 {
   "type": "initial-routing",
   "workspace": "...",
   "branch_action": "use-existing or create-new",
-  "branch_name": "...",
   "task_summary": "...",
   "topic_slug": "...",
   "starting_agent": "hip-expert or troubleshooter or planner or implementer or bash-expert",
@@ -78,8 +77,10 @@ After receiving PM output, apply the **Parsing PM Output — JSON Normalization*
 
 Parse the PM's JSON. Present to the user:
 
-> Working in: `<workspace>` on branch `<branch>`
+> Working in: `<workspace>` (new branch will be created)
 > Task: <task_summary>. Is that right?
+
+If `branch_action` is `use-existing`, show the current branch name instead.
 
 If the user corrects anything, re-dispatch PM with the corrections.
 
@@ -125,15 +126,18 @@ Starting agent: <starting_agent>
 
 Branch creation is **deferred** for `bug` and `knowledge` tasks — these may conclude without code changes, so creating a branch upfront is wasteful. For `design` and `script` tasks, branches are created immediately since code changes are expected.
 
+The Git Agent owns branch naming. It examines existing branches in the repo to determine the naming convention and creates a descriptive name for the task. The session provides the task summary — not a branch name.
+
 - If `branch_action` is `create-new` AND `classification` is `design` or `script`:
   - Dispatch the Git Agent now:
     ```
-    Agent(subagent_type: "git-agent", prompt: "Create and switch to branch <branch_name>. Working directory: <workspace>")
+    Agent(subagent_type: "git-agent", prompt: "Create a new branch for this task and switch to it. Examine existing branches to determine the repo's naming convention, then create a branch name that matches the convention and describes the task. Working directory: <workspace>. Task: <task_summary>. Username: <username>")
     ```
+  - Save the branch name from the Git Agent's output
   - Set `branch_created = true`
 
 - If `branch_action` is `create-new` AND `classification` is `bug` or `knowledge`:
-  - Do NOT create the branch yet. Save `branch_name` for later.
+  - Do NOT create the branch yet. Save `task_summary` and `username` for the deferred dispatch.
   - Set `branch_created = false`
 
 - If `branch_action` is `use-existing`:
@@ -158,7 +162,7 @@ The PM often returns non-compliant JSON. The session MUST normalize PM output be
 
 | Type | Required fields |
 |------|----------------|
-| `initial-routing` | `workspace`, `branch_action`, `branch_name`, `task_summary`, `topic_slug`, `starting_agent`, `starting_context`, `classification` |
+| `initial-routing` | `workspace`, `branch_action`, `task_summary`, `topic_slug`, `starting_agent`, `starting_context`, `classification` |
 | `next-step` | `next_agent`, `context_notes`, `pass_files`, `iteration_change` |
 | `fulfill-request` | `target`, `context_notes`, `pass_files`, `then_resume`, `resume_context` |
 | `commit` | `message`, `files` |
@@ -247,7 +251,8 @@ LOOP:
              CONTINUE LOOP
        - If `branch_created` is false (deferred from Step 4):
          - Dispatch Git Agent to create the branch first:
-           "Create and switch to branch <branch_name>. Working directory: <workspace>"
+           "Create a new branch for this task and switch to it. Examine existing branches to determine the repo's naming convention, then create a branch name that matches the convention and describes the task. Working directory: <workspace>. Task: <task_summary>. Username: <username>"
+         - Save the branch name from the Git Agent's output
          - Set `branch_created = true`
        - Dispatch Git Agent to commit specified files
        - Handle output saving for Git Agent
