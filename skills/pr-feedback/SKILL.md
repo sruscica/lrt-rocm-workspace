@@ -132,6 +132,39 @@ Write your assessment to <thinking_dir>/expert-assessment.md
 """)
 ```
 
+## Step 4b: Write structured PR context
+
+After the expert assessment completes, write `<thinking_dir>/pr-context.json` combining
+the raw comment data (IDs from Step 3) with the expert's classifications (from Step 4).
+
+The session already has the raw API response from Step 3. Extract the relevant fields
+and merge with the expert's classification for each comment:
+
+```json
+{
+  "owner": "<owner>",
+  "repo": "<repo>",
+  "pr_number": <number>,
+  "title": "<PR title>",
+  "comments": [
+    {
+      "id": <comment id from API>,
+      "node_id": "<comment node_id from API>",
+      "path": "<file path>",
+      "line": <line number>,
+      "author": "<comment author>",
+      "body_excerpt": "<first 100 chars of comment body>",
+      "classification": "actionable|informational|discussion",
+      "fix_summary": "<expert's suggested fix, or null if not actionable>"
+    }
+  ]
+}
+```
+
+Write this file using the Write tool. Match each expert classification to its comment
+by file path and line number (the expert's output references the same comment numbers
+and file locations as the API data).
+
 ## Step 5: Present assessment
 
 Read the expert's assessment and present it grouped by classification:
@@ -175,6 +208,7 @@ If the user says yes:
    
    Expert assessment: <thinking_dir>/expert-assessment.md
    PR comments: <thinking_dir>/pr-comments.md
+   PR context: <thinking_dir>/pr-context.json
    ```
 
 3. **Invoke the workflow skill:**

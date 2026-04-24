@@ -693,7 +693,15 @@ intact for the implementer to build on.
 
 For knowledge tasks (no code changes): skip this step. Done.
 
-Ask: "Would you like to push the branch and create a PR?"
+Detect if a PR already exists for this branch. If the task description references
+a `pr-context.json`, read the PR number from it directly. Otherwise, query GitHub:
+```
+gh api repos/<owner>/<repo>/pulls --jq '.[] | select(.head.ref == "<branch_name>") | {number, url}' -q 'state=open'
+```
+Extract `<owner>/<repo>` from the workspace's git remote if not already known.
+
+If a PR exists: ask "Would you like to push to update PR #<number>?"
+If no PR exists: ask "Would you like to push the branch and create a PR?"
 
 If no: Done.
 
@@ -747,24 +755,96 @@ If yes:
     Extract `title` and `body` directly from the JSON — full normalization
     is not required.
 
-3c. Dispatch Git Agent to push and create PR:
-    Agent(subagent_type: "git-agent", prompt: """
-    Push the current branch and create a pull request.
-    Working directory: <workspace>.
+3c. Dispatch Git Agent to push (and create PR if needed):
 
-    1. Push: git push -u origin <branch_name>
-    2. Create PR targeting <branch_base> with exactly this title and body:
+    IF an existing PR was detected:
+      Agent(subagent_type: "git-agent", prompt: """
+      Push the current branch to update the existing PR.
+      Working directory: <workspace>.
 
-    Title: <title from PM>
+      Push: git push origin <branch_name>
+      Report success when done.
+      """)
 
-    Body:
-    <body from PM>
+    IF no existing PR:
+      Agent(subagent_type: "git-agent", prompt: """
+      Push the current branch and create a pull request.
+      Working directory: <workspace>.
 
-    Use: gh pr create --base <branch_base> --title "..." --body "..."
-    Report the PR URL when done.
-    """)
+      1. Push: git push -u origin <branch_name>
+      2. Create PR targeting <branch_base> with exactly this title and body:
 
-3d. Present PR URL to user. Done.
+      Title: <title from PM>
+
+      Body:
+      <body from PM>
+
+      Use: gh pr create --base <branch_base> --title "..." --body "..."
+      Report the PR URL when done.
+      """)
+
+3d. Handle PR review comment updates (PR feedback tasks only):
+
+    Check if the task description references a `pr-context.json` file.
+    If not found: skip to Step 3e (this is a normal workflow, not PR feedback).
+
+    If found, read the file. It contains `owner`, `repo`, `pr_number`, and a
+    `comments` array with `id`, `node_id`, `classification`, and `fix_summary`
+    for each review comment.
+
+    **Reply to actionable comments:**
+    First, get the current short commit hash:
+    ```
+    git -C <workspace> rev-parse --short HEAD
+    ```
+    Store this as `<commit_short>`. Then for each comment where `classification`
+    is `"actionable"`, reply with the fix summary:
+    ```
+    gh api repos/<owner>/<repo>/pulls/<pr_number>/comments/<comment_id>/replies \
+      -f body="Addressed in <commit_short>: <fix_summary>"
+    ```
+    Use inline values for all fields. Do NOT use variable expansion or command
+    substitution.
+
+    **Resolve comment threads:**
+    For each actionable comment, resolve its review thread via GraphQL.
+    First, query the thread ID from the comment's node_id:
+    ```
+    gh api graphql -f query='query { node(id: "<node_id>") { ... on PullRequestReviewComment { pullRequestReview { id } pullRequestReviewThread: thread { id } } } }'
+    ```
+    Extract the thread `id` from the response, then resolve it:
+    ```
+    gh api graphql -f query='mutation { resolveReviewThread(input: {threadId: "<thread_id>"}) { thread { isResolved } } }'
+    ```
+
+    **Update PR description:**
+    Fetch the current PR body:
+    ```
+    gh pr view <pr_number> --repo <owner>/<repo> --json body --jq '.body'
+    ```
+    Append a section summarizing the addressed feedback:
+    ```
+    ## Review feedback addressed
+
+    | Comment | File | Fix |
+    |---------|------|-----|
+    | <body_excerpt> | `<path>:<line>` | <fix_summary> |
+    ...
+
+    Commit: <short hash>
+    ```
+    Update the PR body:
+    ```
+    gh pr edit <pr_number> --repo <owner>/<repo> --body "<updated body>"
+    ```
+
+    **Error handling:** Failures in this step (API errors, permission issues)
+    should be reported to the user but MUST NOT block the pipeline. If a
+    reply, resolve, or description update fails, log the error and continue
+    with the remaining comments. Present a summary of what succeeded and
+    what failed.
+
+3e. Present PR URL to user. Done.
 ```
 
 If `git push` or `gh pr create` fails (e.g., no GitHub remote, no `gh` auth,

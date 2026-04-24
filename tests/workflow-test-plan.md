@@ -471,6 +471,26 @@ Each test case is a mock prompt dispatched through the pipeline, with expected r
   - Expected: Skill reports "No review comments found" and stops
   - Pass criteria: No expert dispatch; user sees informational message
 
+- [ ] **W-F5**: PR feedback — pr-context.json written with correct structure
+  - Setup: pr-feedback fetches 3 comments, expert classifies 2 as actionable and 1 as informational
+  - Expected: `pr-context.json` written to thinking dir with owner, repo, pr_number, and comments array. Each comment has id, node_id, path, line, classification, and fix_summary (null for non-actionable)
+  - Pass criteria: File is valid JSON; actionable comments have non-null fix_summary; informational comment has null fix_summary; all GitHub IDs are present
+
+- [ ] **W-F6**: PR feedback — post-push comment replies and thread resolution
+  - Setup: Workflow completes PR feedback task, pushes to existing PR branch, pr-context.json exists with 2 actionable comments
+  - Expected: Phase 3 Step 3d replies to both actionable comments with commit hash and fix summary, resolves both threads via GraphQL, appends "Review feedback addressed" section to PR body
+  - Pass criteria: Two `gh api` reply calls made (one per actionable comment); two GraphQL resolve mutations; PR body updated with feedback table; no pipeline failure if any API call errors
+
+- [ ] **W-F7**: PR feedback — skipped for non-feedback workflows
+  - Setup: Normal `/workflow` task (not from pr-feedback), no pr-context.json exists
+  - Expected: Phase 3 Step 3d is skipped entirely
+  - Pass criteria: No gh api calls for comment replies; no GraphQL calls; pipeline proceeds normally to Step 3e
+
+- [ ] **W-F8**: PR feedback — existing PR detection
+  - Setup: Workflow on a branch that already has an open PR
+  - Expected: Phase 3 Step 3 asks "push to update PR #N?" instead of "push and create a PR?"
+  - Pass criteria: Session detects existing PR via `gh pr view`; user prompt reflects "update" not "create"
+
 - [ ] **W-E20**: Verification gate — PM claims completion but artifacts missing
   - Prompt: Design task where PM returns `completion` but tests/ directory is empty
   - Expected: Phase 3 Step 0 verification fails
