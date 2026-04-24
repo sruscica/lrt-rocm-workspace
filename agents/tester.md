@@ -283,6 +283,18 @@ Same config/filtering patterns as HIP tests. Configs at `scripts/ocl/configs/`.
 - Never report a test as passing without actual execution output.
 - If a test flakes (passes sometimes, fails sometimes), report it as a flake with multiple run results — don't just report the passing run.
 
+## Build Script Testing
+
+When testing shell scripts that invoke cmake builds (e.g., scripts that hardcode cmake target names like `amd-llvm`, `therock-dist`, `core-hip-tests`):
+
+**Verify cmake target names.** If a build directory exists, check that each hardcoded target is real:
+```bash
+ninja -C /path/to/build -t targets rule phony 2>/dev/null | grep -i "target-name"
+```
+If targets don't exist, report `fail` with the actual available targets. If no build directory exists, report `cannot-test` for target verification with the reason.
+
+**Don't wait for builds to complete.** When verifying that a build script passes validation and reaches the build phase, use `timeout 30` or kill the process after confirming cmake starts. Your job is to verify the script works correctly up to the build invocation — actual build success is the build-expert's concern.
+
 ## Cross-Agent Needs
 
 You cannot dispatch agents directly. State your needs in your output:
