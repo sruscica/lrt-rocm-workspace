@@ -549,9 +549,11 @@ If checks 1-3 fail (required artifacts missing or show failures):
 
 **Step 2: Offer code review (if `offer_review: true`)**
 
+If `offer_review` is `false`: skip to Step 3.
+
 Ask: "Would you like to review the code changes before finalizing?"
 
-If no: Done. Commits stay as-is.
+If no: Go to Step 3.
 
 If yes, follow these steps exactly:
 
@@ -576,7 +578,7 @@ If yes, follow these steps exactly:
     The Git Agent cherry-picks all commits back in original order.
 
 2e. Act on user's answer:
-    - "Yes" / approved: Done.
+    - "Yes" / approved: Go to Step 3.
     - "No" / has feedback:
       1. Record the user's feedback
       2. Send feedback to PM as a new task
@@ -589,6 +591,66 @@ If yes, follow these steps exactly:
 after feedback re-entry loops. The user always gets the opportunity to review changes.
 Step 2d (restore) MUST happen before re-entering Phase 2 — the commit stack must be
 intact for the implementer to build on.
+
+**Step 3: Push & PR**
+
+For knowledge tasks (no code changes): skip this step. Done.
+
+Ask: "Would you like to push the branch and create a PR?"
+
+If no: Done.
+
+If yes:
+
+```
+3a. Gather commit log for PM context:
+    Run: git -C <workspace> log --oneline <base_commit>..HEAD
+    Save the output as <commit_log>.
+
+3b. Dispatch PM to construct PR content:
+    Agent(subagent_type: "pm-orchestrator", prompt: """
+    ADVISOR MODE. Return ONLY a JSON block, no prose.
+
+    Construct a PR title and body for the completed work.
+
+    Completion summary: <PM's completion summary from the completion response>
+
+    Commit log:
+    ---
+    <commit_log>
+    ---
+
+    Respond with ONLY a JSON block:
+    {"type":"pr-content", "title":"<short PR title, under 70 chars>", "body":"<markdown body with ## Summary (2-4 bullets) and ## Test plan (checklist) sections>"}
+    """)
+
+    This is a content-construction dispatch, not a routing decision.
+    Extract `title` and `body` directly from the JSON — full normalization
+    is not required.
+
+3c. Dispatch Git Agent to push and create PR:
+    Agent(subagent_type: "git-agent", prompt: """
+    Push the current branch and create a pull request.
+    Working directory: <workspace>.
+
+    1. Push: git push -u origin <branch_name>
+    2. Create PR with exactly this title and body:
+
+    Title: <title from PM>
+
+    Body:
+    <body from PM>
+
+    Use: gh pr create --title "..." --body "..."
+    Report the PR URL when done.
+    """)
+
+3d. Present PR URL to user. Done.
+```
+
+If `git push` or `gh pr create` fails (e.g., no GitHub remote, no `gh` auth,
+permission denied), inform the user of the error and the branch name so they
+can push/create the PR manually. Do not retry.
 
 ## When to Use This vs. Other Skills
 
