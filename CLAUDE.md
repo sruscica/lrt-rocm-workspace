@@ -1,3 +1,17 @@
+## Idle Notification
+
+When your response involved substantial work (3 or more tool calls), end your response with this exact block on its own line:
+
+```
+██▒░▒█▒░▒█▒░▒█▒░▒█▒░▒█▒░▒█▒░▒█▒░▒█▒░▒██
+██                                   ██
+██      >>> READY FOR INPUT <<<      ██
+██                                   ██
+██▒░▒█▒░▒█▒░▒█▒░▒█▒░▒█▒░▒█▒░▒█▒░▒█▒░▒██
+```
+
+This helps the user notice when you're done, especially during long operations. Do not skip this. Do not modify the format. Print it as plain text, not inside a code block.
+
 # lrt-rocm Plugin Development
 
 This is the source repository for the `lrt-rocm` Claude Code plugin — a multi-agent orchestration system for ROCm/HIP development. When working here, you are improving **the workflow itself**, not doing ROCm development. Do not invoke the `/workflow` skill; that skill is the product, not the tool.

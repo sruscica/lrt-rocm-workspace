@@ -39,13 +39,9 @@ This will:
 
 ### Visual Stop Notification
 
-When Claude finishes responding (after working for 30+ seconds), you'll see a colorful gradient box with "WAITING FOR INPUT" to alert you. The plugin includes:
+When Claude finishes responding after substantial work (3+ tool calls), it prints a visual "READY FOR INPUT" banner at the end of its response. Additionally, the Stop hook fires after 30+ seconds of work to ring the terminal bell and set the terminal title to "CLAUDE IS READY".
 
-- 🎨 6 different gradient designs (randomly selected)
-- 🔔 Terminal bell notification
-- 💻 Windows notification support (if your terminal supports OSC 9)
-
-This is especially helpful when working remotely via SSH or when you've switched to another window - you'll know exactly when Claude is ready for your next input without constantly checking back.
+This two-part approach works because Claude Code's Ink TUI captures hook stdout, so visual notifications must come from Claude's own output rather than from the hook script. The hook handles audio/title notifications that work outside Ink's rendering domain.
 
 ## Skills
 
