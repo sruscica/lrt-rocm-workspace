@@ -801,7 +801,9 @@ If yes:
     is `"actionable"`, reply with the fix summary:
     ```
     gh api repos/<owner>/<repo>/pulls/<pr_number>/comments/<comment_id>/replies \
-      -f body="Addressed in <commit_short>: <fix_summary>"
+      -f body="Addressed in <commit_short>: <fix_summary>
+
+🤖 *Claude Code* 🤖"
     ```
     Use inline values for all fields. Do NOT use variable expansion or command
     substitution.
@@ -832,6 +834,8 @@ If yes:
     ...
 
     Commit: <short hash>
+
+    🤖 *Claude Code* 🤖
     ```
     Update the PR body:
     ```
