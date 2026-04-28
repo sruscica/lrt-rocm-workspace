@@ -35,6 +35,18 @@ This will:
 - Scaffold workspace files (CLAUDE.md, directory-map, task templates)
 - Optionally configure VSCode MCP integration for code review
 
+## Features
+
+### Visual Stop Notification
+
+When Claude finishes responding (after working for 30+ seconds), you'll see a colorful gradient box with "WAITING FOR INPUT" to alert you. The plugin includes:
+
+- 🎨 6 different gradient designs (randomly selected)
+- 🔔 Terminal bell notification
+- 💻 Windows notification support (if your terminal supports OSC 9)
+
+This is especially helpful when working remotely via SSH or when you've switched to another window - you'll know exactly when Claude is ready for your next input without constantly checking back.
+
 ## Skills
 
 ### ROCm-specific
