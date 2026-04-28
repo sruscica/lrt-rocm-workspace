@@ -1,16 +1,6 @@
 ## Idle Notification
 
-When your response involved substantial work (3 or more tool calls), end your response with this exact block on its own line:
-
-```
-██▒░▒█▒░▒█▒░▒█▒░▒█▒░▒█▒░▒█▒░▒█▒░▒█▒░▒███▒░▒█▒░▒█▒░▒█▒░▒█▒░▒█▒░▒█▒░▒█▒░▒█▒░▒█▒░▒█▒░▒█▒░▒█▒░▒█▒░
-██                                   ██▒█▒█▒█▒█▒█▒█▒█▒█▒█▒█▒█▒█▒█▒█▒█▒█▒█▒█▒█▒█▒█▒█▒█▒█▒█▒█▒█▒
-██      >>> READY FOR INPUT <<<      ██░▒█▒░▒█▒░▒█▒░▒█▒░▒█▒░▒█▒░▒█▒░▒█▒░▒█▒░▒█▒░▒█▒░▒█▒░▒█▒░▒█
-██                                   ██▒█▒█▒█▒█▒█▒█▒█▒█▒█▒█▒█▒█▒█▒█▒█▒█▒█▒█▒█▒█▒█▒█▒█▒█▒█▒█▒█▒
-██▒░▒█▒░▒█▒░▒█▒░▒█▒░▒█▒░▒█▒░▒█▒░▒█▒░▒███▒░▒█▒░▒█▒░▒█▒░▒█▒░▒█▒░▒█▒░▒█▒░▒█▒░▒█▒░▒█▒░▒█▒░▒█▒░▒█▒░
-```
-
-This helps the user notice when you're done, especially during long operations. Do not skip this. Do not modify the format. Print it as plain text, not inside a code block.
+When your response involved substantial work (3 or more tool calls), run `bash hooks/generate-banner.sh` (from the plugin root) at the end of your response and print its output as plain text, not inside a code block. This generates a centered gradient banner that says "READY FOR INPUT". Do not skip this.
 
 # lrt-rocm Plugin Development
 
