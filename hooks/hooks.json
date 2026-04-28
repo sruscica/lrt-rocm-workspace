@@ -16,6 +16,17 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "minElapsedMs": 30000,
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/bin/bash \"${CLAUDE_PLUGIN_ROOT}/hooks/stop-gradient\""
+          }
+        ]
+      }
     ]
   }
 }
