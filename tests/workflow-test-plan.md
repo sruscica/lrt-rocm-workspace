@@ -566,6 +566,16 @@ Each test case is a mock prompt dispatched through the pipeline, with expected r
   - Expected: Phase 3 Step 3 asks "push to update PR #N?" instead of "push and create a PR?"
   - Pass criteria: Session detects existing PR via `gh pr view`; user prompt reflects "update" not "create"
 
+- [ ] **W-F9**: PR feedback — verify mode partial-success drift detection
+  - Setup: Prior `/pr-feedback` → `/workflow` round trip completed with `pr-feedback-outcome.json` showing 3 actionable comments where 2 succeeded and 1 had a thread-resolve failure (rate-limited). User invokes `/pr-feedback verify <pr_url>`.
+  - Expected: Verify mode resolves the cached `pr-context.json`, queries live PR state read-only, presents a per-comment table marking the 1 unresolved thread as ❌, prints "Round trip: 3 actionable comments, 2 fully addressed, 1 with drift", and suggests re-running `/workflow` or fixing manually.
+  - Pass criteria: zero mutating gh calls in the dispatch transcript (no `gh pr edit`, no `gh pr comment`, no GraphQL `mutation`); per-comment table renders correctly; drift summary line cites accurate counts; suggested next steps are presented when M > 0.
+
+- [ ] **W-F10**: PR feedback — Step 3d outcome file written on partial failure
+  - Setup: Phase 3 Step 3d runs with 2 actionable comments; the second comment's `resolveReviewThread` GraphQL call fails with a permissions error.
+  - Expected: Both reply attempts complete (first succeeds, second succeeds); first thread resolves; second thread fails. Step 3d writes `pr-feedback-outcome.json` with both records — first showing all `true`, second showing `reply_posted: true, thread_resolved: false, thread_error: "<perm error>"`. Phase 3 Step 1 reads the file and prints the multi-line "PR feedback round trip — partial success" block citing comment 2's failure.
+  - Pass criteria: outcome file exists at `<thinking_dir>/pr-feedback-outcome.json` with the documented schema; user-facing summary contains the failure block, not the success one-liner.
+
 - [ ] **W-E20**: Verification gate — PM claims completion but artifacts missing
   - Prompt: Design task where PM returns `completion` but tests/ directory is empty
   - Expected: Phase 3 Step 0 verification fails

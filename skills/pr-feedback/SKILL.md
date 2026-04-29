@@ -7,7 +7,18 @@ description: Fetch and triage PR review comments with expert assessment, then op
 
 Review and triage pull request comments with expert assessment on what should be addressed.
 
-**Usage:** `/pr-feedback <PR URL or owner/repo#number>`
+**Usage:**
+- `/pr-feedback <PR URL or owner/repo#number>` — triage mode (default)
+- `/pr-feedback verify <PR URL or owner/repo#number>` — verify-mode round-trip check
+
+## Step 0: Argument disambiguation
+
+Parse `$ARGUMENTS`:
+
+- If the first whitespace-separated token is the literal word `verify` (case-insensitive), this is **verify mode**. The remaining argument(s) form the PR reference. Branch immediately to **Step V1: Verify Mode** at the bottom of this file. Do NOT continue to Step 1.
+- Otherwise this is **triage mode** (the original flow). Continue to Step 1 with `$ARGUMENTS` as the PR reference.
+
+If `$ARGUMENTS` is `verify` with no PR reference: search the workspace for a recent `pr-context.json` (look in `<artifact_base>/thinking/*-pr-*-feedback/pr-context.json`, sorted by modification time, newest first). If exactly one is found, use it and continue. If zero or multiple are found, ask the user to specify the PR.
 
 ## Step 1: Parse PR reference
 
@@ -306,3 +317,99 @@ If the user says yes:
 The workflow pipeline will detect `branch_action: use-existing` (the PR branch
 is already checked out) and proceed with the regular Phase 1 → Phase 2 → Phase 3 flow.
 The expert assessment file provides context for the pipeline's specialists.
+
+---
+
+## Step V1: Verify Mode (entered from Step 0)
+
+Verify mode is **strictly read-only**. It checks whether a prior `/pr-feedback` →
+`/workflow` round trip actually landed on GitHub. It NEVER mutates GitHub state:
+no `gh pr edit`, no `gh pr comment`, no GraphQL mutations, no posting replies.
+
+### V1.1: Resolve context
+
+The verify run needs two things: the cached `pr-context.json` (what we intended
+to address) and the live PR state (what's actually on GitHub).
+
+Resolve the PR reference and the cached context:
+
+- If a `pr-context.json` path was inferred in Step 0 from the workspace search,
+  read it directly. The PR reference comes from the file's `owner`, `repo`,
+  `pr_number` fields.
+- If a PR reference was given on the command line: parse it (same rules as
+  Step 1 of triage mode), then search the workspace for a matching
+  `pr-context.json` (filter by `pr_number` field). If none found, tell the user:
+  > Verify mode requires a cached `pr-context.json` from a prior `/pr-feedback`
+  > run. None found for PR #<number>. Pure-from-URL verification (without a
+  > cached context) is not supported — there is no record of which comments
+  > we intended to address.
+
+### V1.2: Fetch live PR state
+
+Run (all read-only):
+
+```
+gh pr view <number> --repo <owner>/<repo> --json body,headRefName,state,url
+gh api repos/<owner>/<repo>/pulls/<number>/comments
+```
+
+For each comment in the cached context, query its current thread state via
+GraphQL (read-only query, no mutation):
+
+```
+gh api graphql -f query='query { node(id: "<node_id>") { ... on PullRequestReviewComment { id databaseId pullRequestReview { id } } } }'
+```
+
+Then query the thread resolution status. The simplest read-only path is to
+fetch all review threads on the PR once and index them locally:
+
+```
+gh api graphql -f query='query { repository(owner: "<owner>", name: "<repo>") { pullRequest(number: <number>) { reviewThreads(first: 100) { nodes { id isResolved comments(first: 1) { nodes { databaseId } } } } } }'
+```
+
+Index by `databaseId` of the first comment in each thread. Match each cached
+comment's `id` (which is `databaseId`) to find its thread's `isResolved`.
+
+### V1.3: Match and detect drift
+
+For each comment in the cached `pr-context.json`:
+
+- **Skipped (not actionable):** classification was `informational` or
+  `discussion`. No reply expected. No thread resolution expected.
+  Verify outcome: `skipped` (always passes — nothing to check).
+- **Actionable:** classification was `actionable`. Expected:
+  1. A reply from us containing the marker `🤖 *Claude Code* 🤖` on this
+     comment thread.
+  2. The review thread is resolved (`isResolved: true`).
+  3. The PR body contains the `## Review feedback addressed` section with a
+     row referencing this comment.
+
+For each expected item, mark `present` or `missing` based on the live state.
+
+### V1.4: Report drift
+
+Present a per-comment table:
+
+```
+| Comment | File:Line | Reply | Thread | PR body row |
+|---------|-----------|-------|--------|-------------|
+| #<id>   | <path>:<line> | ✅ posted | ✅ resolved | ✅ present |
+| #<id>   | <path>:<line> | ❌ missing | ❌ unresolved | ❌ missing |
+| #<id>   | <path>:<line> | — skipped (informational) | — | — |
+```
+
+Below the table, summary line:
+> Round trip: <N> actionable comments, <K> fully addressed, <M> with drift.
+
+If `M > 0`, suggest next steps to the user:
+> To address the drift, either:
+> 1. Re-run `/workflow` with the original PR feedback task (the existing
+>    `pr-context.json` will be picked up by Phase 3 Step 3d).
+> 2. Manually post replies and resolve threads via the GitHub UI for items
+>    you've already addressed locally.
+
+If `M == 0`: print one line:
+> Round trip verified: all actionable items addressed.
+
+Verify mode ends here. Do not transition to `/workflow`. Do not modify any
+GitHub state. Done.

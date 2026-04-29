@@ -61,8 +61,52 @@
     gh pr edit <pr_number> --repo <owner>/<repo> --body "<updated body>"
     ```
 
+    **Outcome accumulation (run inline with the loop, not at the end):**
+    For each comment processed in the steps above, build a record:
+    ```json
+    {
+      "comment_id": <id>,
+      "node_id": "<node_id>",
+      "path": "<path>",
+      "line": <line>,
+      "classification": "<classification>",
+      "reply_posted": true | false,
+      "reply_error": null | "<error message>",
+      "thread_resolved": true | false,
+      "thread_error": null | "<error message>"
+    }
+    ```
+    For non-actionable comments (informational/discussion), set both
+    `reply_posted` and `thread_resolved` to `false` with `reply_error` /
+    `thread_error` set to `"skipped: not actionable"` — this preserves a
+    full audit trail of what was considered.
+
+    For the PR description update, track separately:
+    ```json
+    { "pr_body_updated": true | false, "pr_body_error": null | "<error>" }
+    ```
+
+    **Write outcome file (after the loop completes, even on partial failure):**
+    Compose the full outcome and write it to
+    `<thinking_dir>/pr-feedback-outcome.json`:
+    ```json
+    {
+      "pr_number": <pr_number>,
+      "owner": "<owner>",
+      "repo": "<repo>",
+      "commit_short": "<commit_short>",
+      "pr_body_updated": <bool>,
+      "pr_body_error": <null | string>,
+      "comments": [ <records from the loop> ]
+    }
+    ```
+    Use the Write tool with the absolute path. If this file write itself
+    fails, log to the user and continue (do not retry, do not block) — the
+    user-facing summary below still works from in-memory state in that case.
+
     **Error handling:** Failures in this step (API errors, permission issues)
     should be reported to the user but MUST NOT block the pipeline. If a
-    reply, resolve, or description update fails, log the error and continue
-    with the remaining comments. Present a summary of what succeeded and
-    what failed.
+    reply, resolve, or description update fails, log the error in the
+    outcome record and continue with the remaining comments. Present a
+    summary of what succeeded and what failed (Phase 3 Step 1 reads the
+    outcome file and surfaces it to the user).

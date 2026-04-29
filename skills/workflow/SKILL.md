@@ -686,6 +686,26 @@ Phase 2.5 may:
 - Thinking artifacts: `<thinking_dir>/`
 - Test artifacts: `<workspace>/testing/<topic>/`
 - **Testing gaps** (if tester reported `cannot-test`): what couldn't be verified and why
+- **PR feedback round trip** (only if `<thinking_dir>/pr-feedback-outcome.json` exists):
+  Read the file. Compute counts:
+  - `replies_posted` = comments where `reply_posted == true`
+  - `replies_failed` = comments where `reply_posted == false` AND `reply_error` does not start with `"skipped"`
+  - `threads_resolved` = comments where `thread_resolved == true`
+  - `threads_failed` = comments where `thread_resolved == false` AND `thread_error` does not start with `"skipped"`
+  - `pr_body_updated` = top-level field
+
+  If all of `replies_failed == 0`, `threads_failed == 0`, and `pr_body_updated == true`: print one line:
+  > PR feedback round trip: <replies_posted> replies posted, <threads_resolved> threads resolved, PR body updated.
+
+  Otherwise (any failure): print a multi-line block:
+  > PR feedback round trip — partial success:
+  > - Replies: <replies_posted>/<replies_posted + replies_failed> posted
+  > - Threads: <threads_resolved>/<threads_resolved + threads_failed> resolved
+  > - PR body: <updated | failed: <pr_body_error>>
+  >
+  > Failed items (re-run with `/pr-feedback verify <pr_url>` to re-check):
+  > - Comment #<comment_id> (<path>:<line>): reply <reply_error or "ok">; thread <thread_error or "ok">
+  > ...
 
 **Step 2: Offer code review (if `offer_review: true`)**
 
