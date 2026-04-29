@@ -1,6 +1,15 @@
-## Idle Notification
+## Idle Notification — HARD REQUIREMENT
 
-When your response involved substantial work (3 or more tool calls), run `bash hooks/generate-banner.sh` (from the plugin root) at the end of your response and print its output as plain text, not inside a code block. This generates a centered gradient banner that says "READY FOR INPUT". Do not skip this.
+The user switches focus while you work. The terminal bell alone is not enough — the READY FOR INPUT banner is their visual signal that you need their attention.
+
+**When to display:** BEFORE any user-facing prompt — AskUserQuestion, text that asks a question, or the end of a turn — if 3 or more tool calls were made since the banner was last shown. Show the banner BEFORE the prompt, not after it.
+
+**How to display:**
+1. Run: `bash hooks/generate-banner.sh > /tmp/.claude-banner.txt` (from this file's directory)
+2. Read `/tmp/.claude-banner.txt`
+3. Print the contents as plain text — NOT inside a code block
+
+This is not optional. Do not defer it. Do not forget it during multi-step workflows or skill execution. If you are about to ask the user anything and you've done substantial work since the last banner, show it first.
 
 # lrt-rocm Plugin Development
 
@@ -131,7 +140,6 @@ The session manages state transitions (writing to status.md via note-taker). The
 | `hooks/` | Session-start hooks, auto-update checks |
 | `scripts/` | Helper scripts (rk.py for branch management, review.py for code review) |
 | `templates/` | Workspace scaffolding (CLAUDE.md template, directory-map, etc.) |
-| `workflows/` | Procedure documentation (build pipeline, debugging tips) |
 
 ## Making Changes
 
