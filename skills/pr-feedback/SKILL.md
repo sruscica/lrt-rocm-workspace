@@ -180,6 +180,7 @@ Branch: <headRefName> → <baseRefName>
 <for each comment, include:>
 ---
 Comment #<n>:
+  Comment ID: <api id from Step 3 — integer, e.g. 1234567890>
   Author: <author>
   File: <path> (line <line>)
   Body: <comment body>
@@ -192,15 +193,19 @@ Comment #<n>:
 ### Classification
 
 For each comment, provide:
-1. **Classification**: one of:
+1. **Comment ID**: echo the Comment ID exactly as given in the input. The session
+   uses this as the match key to merge your classifications back into the API
+   data — if it is missing or wrong, the comment will be defaulted to
+   informational and no reply will be posted.
+2. **Classification**: one of:
    - **Actionable** — a legitimate issue that should be fixed (bug, missing validation,
      style violation per project conventions, etc.)
    - **Informational** — no code change needed (praise, acknowledgment, explanation,
      question already answered by the code)
    - **Discussion** — needs the PR author's input before deciding (design question,
      trade-off choice, scope question)
-2. **Reasoning**: one sentence explaining why
-3. **Suggested fix** (actionable only): brief description of what to change
+3. **Reasoning**: one sentence explaining why
+4. **Suggested fix** (actionable only): brief description of what to change
 
 Write your assessment to <thinking_dir>/expert-assessment.md
 """)
@@ -235,9 +240,29 @@ and merge with the expert's classification for each comment:
 }
 ```
 
-Write this file using the Write tool. Match each expert classification to its comment
-by file path and line number (the expert's output references the same comment numbers
-and file locations as the API data).
+Write this file using the Write tool.
+
+**Match logic (id-based, deterministic):** Build a map from Comment ID to
+classification by parsing the `Comment ID:` lines in the expert's assessment.
+For each comment in the API response, look up its `id` in this map.
+
+`(file, line)` is NOT a usable match key because it can collide: two reviewers
+can comment on the same line, a reviewer can leave multiple comments on one
+line, and file-level review comments have `line: null` which collides with
+every other null-line comment in the same file. The Comment ID is unique per
+comment in the GitHub API and is the only safe key.
+
+**Fallback for unmatched comments** (expert omitted the Comment ID, or returned
+an ID not in the API set):
+- `classification: "informational"`
+- `fix_summary: null`
+- Log a warning to the user: `"Expert assessment did not classify comment <id>
+  (<path>:<line>) — defaulting to informational, no reply will be posted."`
+
+Informational is the safe default — Phase 3 Step 3d (in the workflow skill)
+skips reply posting and thread resolution for informational comments, so a
+missed classification becomes a no-op rather than a misattributed reply on
+the wrong comment thread.
 
 ## Step 5: Present assessment
 
