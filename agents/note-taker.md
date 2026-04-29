@@ -97,43 +97,33 @@ This section is created on first invocation and appended to thereafter. Do not o
 
 ## pre-existing-failures.md
 
-When the session asks you to write or append wider-suite triage findings, write to `<thinking_dir>/pre-existing-failures.md`. The file has two parts: a **Reproduction Context** block (written ONCE on first write) and a **Failures** table (appended row-by-row on every write).
+When the session asks you to write or append wider-suite triage findings, write to `<thinking_dir>/pre-existing-failures.md`.
 
-**First write** — file does NOT exist yet. The session passes you Reproduction Context values. Render the full template:
+**Contract (mandatory): the SESSION pre-renders the markdown; you write it verbatim.**
+You do NOT substitute placeholders, you do NOT format tables, you do NOT format
+bullet lists. The session has the values, the session does the rendering. You
+are a literal blob writer.
 
-```markdown
----
-created: <ISO 8601>
-iteration: <major>.<minor>
----
+**First write** — file does NOT exist yet. The session passes you a complete
+`<file_content>` markdown blob. Your only job:
+- Verify the file does not exist (use Read; expect not-found).
+- Write `<file_content>` verbatim to the target path. No edits, no normalization.
 
-# Pre-existing Failures (Wider Suite Triage)
+**Subsequent writes (append rows)** — file already exists. The session passes you:
+- The target path
+- One or more `<row>` strings, each a complete pipe-delimited markdown table row
+  (e.g., `| <test> | <suite> | <CLASSIFICATION> | <evidence> | <sub-step> |`)
 
-## Reproduction Context
-- Workspace: <workspace>
-- Workspace HEAD: <workspace_head>
-- Base branch: <branch_base> @ <base_head>
-- GPU arch: <gpu_arch>
-- Container project: <project>
-- Test command pattern: <test_command_pattern>
-- Submodule state at triage time:
-  ```
-  <submodule_status>
-  ```
+Your job:
+1. Read the existing file.
+2. Locate the `## Failures` table.
+3. Append each `<row>` as a new line at the end of the table (after the last
+   existing row, before any trailing blank line).
+4. DO NOT touch anything above `## Failures` — not the frontmatter, not the H1,
+   not the Reproduction Context block. (A pipeline rebase mid-run is a known
+   limitation; original Reproduction Context stays as the source of truth.)
 
-## Failures
-
-| Test | Suite | Classification | Evidence | Sub-step |
-|------|-------|----------------|----------|----------|
-| <test name> | <suite> | <CLASSIFICATION> | <evidence> | <major>.<minor>-tester-wider |
-```
-
-**Subsequent writes** — file already exists. The session passes you only new failure rows. You MUST:
-- Read the existing file
-- Append the new rows to the existing `## Failures` table
-- DO NOT touch the Reproduction Context block, even if the session passes new context values (a pipeline rebase mid-run is a known limitation; original context stays as the source of truth for that pipeline run)
-
-Classifications:
+Classifications used in `<CLASSIFICATION>` field of failure rows:
 - `PRE-EXISTING` — failed 3/3 times without source changes (not caused by this PR)
 - `CANNOT-CLASSIFY` — flake during triage re-run (mixed pass/fail without source changes)
 - `UNTRIAGED-CANNOT-CLASSIFY` — over the per-iteration triage budget (not investigated)

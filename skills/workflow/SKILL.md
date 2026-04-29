@@ -951,9 +951,13 @@ The session passes these values to note-taker on the first dispatch. Subsequent 
 
 Limitation (documented): if the user rebases mid-pipeline-run, the captured hashes can stale. Triage results remain valid for the captured state; reproduce against `<workspace_head>` (which still exists in the reflog) rather than current HEAD.
 
-**8b. File template.**
+**8b. File template — SESSION renders, note-taker writes verbatim.**
 
-Note-taker writes/appends `<thinking_dir>/pre-existing-failures.md`:
+The session pre-renders the file content and passes it as a literal blob to
+note-taker (note-taker is a literal writer, not a templater — see
+`agents/note-taker.md`).
+
+**First write — session renders this complete `<file_content>` string:**
 
 ```markdown
 ---
@@ -979,10 +983,23 @@ iteration: <major>.<minor>
 
 | Test | Suite | Classification | Evidence | Sub-step |
 |------|-------|----------------|----------|----------|
+| <first failure row, fully rendered with values> |
+```
+
+The session substitutes ALL placeholders before dispatching. Note-taker writes
+the resulting blob verbatim (no edits, no normalization).
+
+**Subsequent writes — session renders each new row, note-taker appends:**
+
+The session formats each new failure as a complete pipe-delimited row:
+```
 | <test name> | <suite> | PRE-EXISTING | 3/3 fail without source changes | <major>.<minor>-tester-wider |
 | <test name> | <suite> | CANNOT-CLASSIFY | flake (2 pass / 1 fail) without source changes | <major>.<minor>-tester-wider |
 | <test name> | <suite> | UNTRIAGED-CANNOT-CLASSIFY | exceeded triage budget | <major>.<minor>-tester-wider |
 ```
+
+Note-taker reads the existing file and appends each row to the `## Failures`
+table without touching the Reproduction Context block.
 
 **8c. status.md addendum.**
 
