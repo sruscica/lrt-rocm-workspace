@@ -126,6 +126,7 @@ created: <ISO 8601>
 current_stage: PM Orchestrator
 iteration: 1.0
 build_status: NOT BUILT
+test_status: NOT TESTED
 ---
 
 ## Completed Stages
@@ -141,6 +142,19 @@ Transitions (managed by session):
 - `BUILT` → build-expert compiled successfully
 - `BUILD DEFERRED` → build-expert determined all changes are non-functional
 - `BUILD FAILED` → build-expert attempted build, compilation failed
+
+## Test Status
+`NOT TESTED`
+
+Transitions (managed by session):
+- `NOT TESTED` → initial state, or reset after reviewer rejection
+- `TESTED (targeted-pass)` → tester ran targeted suite, all passed
+- `TESTED (targeted-fail)` → tester ran targeted suite, ≥1 failed
+- `TESTED (wider-pass)` → [reserved for future phase] both targeted and wider passed
+- `TESTED (regression)` → [reserved for future phase] wider triage = caused by PR
+- `TESTED (pre-existing-flagged)` → [reserved for future phase] wider triage = pre-existing
+- `TESTED (cannot-classify)` → [reserved for future phase] flake split during triage
+- `CANNOT TEST` → environment lacks required capabilities
 
 ## Blockers
 

@@ -561,6 +561,20 @@ When dispatching the reviewer and Build Status is `BUILD DEFERRED`, include in t
 
 When the PM routes back to implementer, planner, or hip-expert after a reviewer rejection (partial/fail-spec/fail), the session MUST update status.md: `Build Status: NOT BUILT`. This ensures stale build state from a prior iteration cannot leak into the next one. The next commit triggers the post-commit sequence, which sets Build Status fresh.
 
+### Test Status Reset
+
+Same trigger as Build Status Reset. When the PM routes back to implementer, planner, or hip-expert after a reviewer rejection (partial/fail-spec/fail), the session MUST also update status.md: `Test Status: NOT TESTED`. This ensures stale test state from a prior iteration cannot mask a regression introduced by the new code. The next tester dispatch sets Test Status fresh.
+
+### Test Status Update After Tester Dispatch
+
+After every tester dispatch completes, the session MUST update status.md `Test Status` based on the tester's verdict:
+
+- Tester verdict `pass` → `Test Status: TESTED (targeted-pass)`
+- Tester verdict `fail` → `Test Status: TESTED (targeted-fail)`
+- Tester verdict `cannot-test` → `Test Status: CANNOT TEST`
+
+The wider-suite outcome states (`TESTED (wider-pass)`, `TESTED (regression)`, `TESTED (pre-existing-flagged)`, `TESTED (cannot-classify)`) are reserved for future phases that add wider-suite execution and triage. In the current phase, the tester proposes a wider suite in its output but does not run it; the proposal is informational only.
+
 ### Bisect Inner Loop
 
 When PM returns `type: "bisect"`:

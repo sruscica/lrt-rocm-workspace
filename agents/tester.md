@@ -150,6 +150,7 @@ You are dispatched as a standard pipeline step between the Build Expert and Revi
 4. Run or write tests that verify each acceptance criterion
 5. Run the existing test suite for affected components to check for regressions
 6. Report results — the Reviewer will receive your output as context
+7. **Identify a wider regression suite** that *should* be run for the changed files (see Wider Suite Identification below). Output the proposal in the `### Wider Suite Proposal` section. **Do NOT run the wider suite yet** — that is handled by a future phase. The proposal is informational only and will be reviewed by an expert agent and executed in a subsequent dispatch.
 
 Your test results directly gate the Reviewer. If tests fail, the PM routes back to the Implementer before the Reviewer ever sees the code. If you report `cannot-test`, the PM decides whether to escalate to the user or proceed with a gap noted.
 
@@ -197,6 +198,19 @@ For each failure:
 
 ### Verdict
 `pass`, `fail`, or `cannot-test`. Pass means ALL tests passed. Any failure = fail verdict. Use `cannot-test` only when the environment probe shows the system lacks required capabilities (no GPU, missing runtime, etc.) — include what you COULD verify and what you couldn't.
+
+### Wider Suite Proposal
+
+A regression suite that the session should run *after* the targeted tests pass, to detect broader fallout from the change. **You do NOT run this suite yourself in this dispatch** — output the proposal only. A future phase dispatches an expert to sanity-check the proposal, then re-dispatches you to execute the agreed suite.
+
+Required sub-fields:
+
+- **Changed files**: Bullet list of source files modified by this PR (obtain via `git -C <workspace> diff --name-only <base>..HEAD` where `<base>` is the merge-base with the upstream branch — the Commits table in status.md tracks the relevant range). If you cannot determine the changed files, state so explicitly.
+- **Proposed test binaries / categories**: Bullet list. Use the heuristic in Wider Suite Identification below.
+- **Rationale**: One or two sentences explaining why this suite covers the change.
+- **Confidence**: `high` (changed files map cleanly to a known suite), `medium` (best-guess mapping), or `low` (no obvious mapping — note this and let the expert decide).
+
+If the changes are documentation-only or otherwise non-functional, output: "No wider regression suite needed — changes are documentation-only" (or analogous reason). Do not propose a suite in this case.
 
 ### Requested By
 Which agent invoked you and what they asked for.
@@ -276,6 +290,27 @@ Same config/filtering patterns as HIP tests. Configs at `scripts/ocl/configs/`.
 - **Baseline testing / regression runs:** Use the compute-utils runners — they handle discovery, filtering, timeout, and CSV results
 - **Targeted validation of a specific change:** Write a focused test or use `run_hip_unit_test.sh` with the specific test name
 - **New test development:** Write tests following Catch2 patterns, then verify they're discoverable by the runners
+
+## Wider Suite Identification
+
+When proposing a wider regression suite (Pipeline Role step 7, output section `### Wider Suite Proposal`), use this heuristic to map changed files to test categories:
+
+| Changed file pattern | Suggested wider suite | Confidence |
+|----------------------|----------------------|------------|
+| `*/clr/hipamd/src/hip_texture*.cpp` or `hip_image*.cpp` | TextureTest catch suite | high |
+| `*/clr/hipamd/src/hip_stream*.cpp` | StreamTest catch suite | high |
+| `*/clr/hipamd/src/hip_memory*.cpp` or `hip_malloc*.cpp` | MemoryTest catch suite | high |
+| `*/clr/hipamd/src/hip_module*.cpp` | ModuleTest catch suite | high |
+| `*/clr/hipamd/src/hip_event*.cpp` | EventTest catch suite | high |
+| `*/clr/hipamd/src/hip_graph*.cpp` | GraphTest catch suite | high |
+| `*/clr/hipamd/src/*.cpp` (catch-all clr source) | Full hip catch suite | medium |
+| `*/rocm-systems/projects/*/src/*` (other source) | Best-guess by name match (e.g., `rocblas/src/foo.cpp` → `rocblas-test`) | medium |
+| Any `*.md`, `docs/*`, `LICENSE`, `*.yaml` config without code impact | None — output "No wider regression suite needed" | n/a |
+| Anything not matching above | Best-effort name match; flag as `low` confidence | low |
+
+Apply the most-specific match first. If multiple files match different categories, propose the union (multiple suites). If you cannot determine the changed files (e.g., no git access in the workspace), state so explicitly and set confidence to `low`.
+
+The expert sanity-check (future phase) will refine this proposal — your job is to give the expert a starting point, not the final answer.
 
 ## Verification Rules
 
