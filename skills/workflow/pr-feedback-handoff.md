@@ -4,12 +4,22 @@
 
 3d. Handle PR review comment updates (PR feedback tasks only):
 
-    Check if the task description references a `pr-context.json` file.
-    If not found: skip to Step 3e (this is a normal workflow, not PR feedback).
+    **Detection (structured marker, not prose match):**
+    Parse the task description for a line matching the line-anchored regex
+    `^PR_CONTEXT: (\S+)$`. The pr-feedback skill emits this marker as the
+    final structured handoff line.
 
-    If found, read the file. It contains `owner`, `repo`, `pr_number`, and a
-    `comments` array with `id`, `node_id`, `classification`, and `fix_summary`
-    for each review comment.
+    - If no line in the task description matches the regex: skip to Step 3e
+      (this is a normal workflow, not PR feedback). Do NOT search the task
+      description for prose mentions of `pr-context.json` — they are not the
+      handoff signal.
+    - If a line matches: capture the path. Run `test -f <path>` to verify the
+      file exists. If `test` fails, log a warning to the user
+      ("PR_CONTEXT marker present but file missing at <path> — skipping PR
+      feedback handoff") and skip to Step 3e.
+    - If both checks pass, read the file. It contains `owner`, `repo`,
+      `pr_number`, and a `comments` array with `id`, `node_id`,
+      `classification`, and `fix_summary` for each review comment.
 
     **Reply to actionable comments:**
     First, get the current short commit hash:

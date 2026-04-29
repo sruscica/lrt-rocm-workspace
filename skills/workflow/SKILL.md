@@ -985,13 +985,18 @@ If yes:
 
 3d. Handle PR review comment updates (PR feedback tasks only):
 
-    Check if the task description references a `pr-context.json` file.
-    If not found: skip to Step 3e (this is a normal workflow, not PR feedback).
+    Parse the task description for a line matching the line-anchored regex
+    `^PR_CONTEXT: (\S+)$` (this is the structured handoff marker emitted by
+    `/pr-feedback`). If absent OR the captured path fails `test -f`, skip to
+    Step 3e (normal workflow, not PR feedback). Prose mentions of
+    `pr-context.json` elsewhere in the task description do NOT trigger
+    engagement.
 
-    If found, **read and follow: `skills/workflow/pr-feedback-handoff.md`**
+    If marker present and file exists, **read and follow: `skills/workflow/pr-feedback-handoff.md`**
 
-    Inputs: `<workspace>`, the `pr-context.json` path from the task description
-    Outputs: posted replies, resolved review threads, updated PR description
+    Inputs: `<workspace>`, the `pr-context.json` absolute path from the marker
+    Outputs: posted replies, resolved review threads, updated PR description,
+             `<thinking_dir>/pr-feedback-outcome.json` (consumed by Step 1)
 3e. Present PR URL to user. Done.
 ```
 

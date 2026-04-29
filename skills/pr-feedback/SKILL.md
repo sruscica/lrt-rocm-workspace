@@ -303,7 +303,20 @@ If the user says yes:
    PR comments: <thinking_dir>/pr-comments.md
    PR context: <thinking_dir>/pr-context.json
    Verification gaps: <thinking_dir>/verification-gaps.md
+
+   PR_CONTEXT: <absolute path to pr-context.json>
    ```
+
+   The final `PR_CONTEXT:` line is a structured handoff marker that the workflow
+   skill's Phase 3 Step 3d uses to detect PR feedback tasks. It MUST:
+   - Be on its own line, anchored at the start of the line (no leading whitespace).
+   - Contain the literal prefix `PR_CONTEXT: ` followed by the absolute path.
+   - Use the absolute path (not the `<thinking_dir>/` shorthand) — the path is
+     consumed by `test -f` and parsed by line-anchored regex.
+
+   This marker is required regardless of which sections (gaps, actionable, or
+   both) are present in the task description above. Always include it whenever
+   `pr-context.json` was written in Step 4b.
 
    If only gaps exist (no actionable items), omit the "Review feedback" section and
    the assessment-file reference. If only actionable items exist, omit the

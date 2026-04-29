@@ -557,8 +557,13 @@ Each test case is a mock prompt dispatched through the pipeline, with expected r
   - Pass criteria: Two `gh api` reply calls made (one per actionable comment); two GraphQL resolve mutations; PR body updated with feedback table; no pipeline failure if any API call errors
 
 - [ ] **W-F7**: PR feedback — skipped for non-feedback workflows
-  - Setup: Normal `/workflow` task (not from pr-feedback), no pr-context.json exists
-  - Expected: Phase 3 Step 3d is skipped entirely
+  - Setup: Normal `/workflow` task (not from pr-feedback). Run two variants:
+    (a) task description has no mention of `pr-context.json`.
+    (b) task description mentions `pr-context.json` in prose (e.g.,
+        "fix bug in the pr-context.json writer") but has NO `^PR_CONTEXT: `
+        marker line.
+  - Expected: In BOTH variants, Phase 3 Step 3d is skipped entirely. Prose
+    mentions do not trigger engagement — only the line-anchored marker does.
   - Pass criteria: No gh api calls for comment replies; no GraphQL calls; pipeline proceeds normally to Step 3e
 
 - [ ] **W-F8**: PR feedback — existing PR detection
@@ -570,6 +575,21 @@ Each test case is a mock prompt dispatched through the pipeline, with expected r
   - Setup: Prior `/pr-feedback` → `/workflow` round trip completed with `pr-feedback-outcome.json` showing 3 actionable comments where 2 succeeded and 1 had a thread-resolve failure (rate-limited). User invokes `/pr-feedback verify <pr_url>`.
   - Expected: Verify mode resolves the cached `pr-context.json`, queries live PR state read-only, presents a per-comment table marking the 1 unresolved thread as ❌, prints "Round trip: 3 actionable comments, 2 fully addressed, 1 with drift", and suggests re-running `/workflow` or fixing manually.
   - Pass criteria: zero mutating gh calls in the dispatch transcript (no `gh pr edit`, no `gh pr comment`, no GraphQL `mutation`); per-comment table renders correctly; drift summary line cites accurate counts; suggested next steps are presented when M > 0.
+
+- [ ] **W-F11**: PR feedback — marker present and file exists triggers Step 3d engagement
+  - Setup: Task description from `/pr-feedback` ending with `PR_CONTEXT: /abs/path/to/pr-context.json`; the file exists.
+  - Expected: Phase 3 Step 3d parses the marker, validates the file via `test -f`, reads `pr-context.json`, and proceeds with the reply/resolve/PR-body-update sequence.
+  - Pass criteria: Step 3d engages; gh api comment-reply calls fire for actionable comments; outcome file is written.
+
+- [ ] **W-F12**: PR feedback — marker absent skips Step 3d (even with prose mention)
+  - Setup: Task description includes the prose phrase "fix bug in the pr-context.json writer" but contains NO `^PR_CONTEXT: ` marker line.
+  - Expected: Phase 3 Step 3d skips to Step 3e. Prose mention is ignored.
+  - Pass criteria: Zero gh api comment calls; pipeline proceeds normally.
+
+- [ ] **W-F13**: PR feedback — marker present but file missing skips Step 3d with warning
+  - Setup: Task description has `PR_CONTEXT: /tmp/missing.json` but the file does not exist (e.g., it was deleted between pr-feedback running and workflow being invoked, or the user manually constructed the task description with a wrong path).
+  - Expected: Phase 3 Step 3d logs a warning ("PR_CONTEXT marker present but file missing at /tmp/missing.json — skipping PR feedback handoff") and skips to Step 3e. Pipeline does NOT block.
+  - Pass criteria: Warning logged to user; zero gh api comment calls; pipeline proceeds normally; no errors raised.
 
 - [ ] **W-F10**: PR feedback — Step 3d outcome file written on partial failure
   - Setup: Phase 3 Step 3d runs with 2 actionable comments; the second comment's `resolveReviewThread` GraphQL call fails with a permissions error.
