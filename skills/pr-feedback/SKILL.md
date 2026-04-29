@@ -19,7 +19,7 @@ Parse `$ARGUMENTS` to extract the PR:
 
 Run:
 ```
-gh pr view <number> --repo <owner>/<repo> --json title,headRefName,baseRefName,state,url
+gh pr view <number> --repo <owner>/<repo> --json title,headRefName,baseRefName,state,url,body
 ```
 
 Present to the user:
@@ -69,9 +69,72 @@ gh pr diff <number> --repo <owner>/<repo>
 
 Write the raw data to `<thinking_dir>/pr-comments.md` for reference.
 
-If there are no comments, report "No review comments found on this PR." and stop.
+If there are no comments, **do not stop yet** — continue to Step 3.5. The PR may still
+have verification gaps worth surfacing even without reviewer activity.
+
+## Step 3.5: Detect verification gaps
+
+Verification gaps are objective signals that the PR is incomplete, separate from any
+reviewer feedback. Two sources:
+
+### A. Unchecked Test plan items
+
+The `body` field fetched in Step 1 may contain a `## Test plan` section with checklist
+items. Extract any unchecked items from that section.
+
+Parsing rules (apply in order):
+1. Locate the line matching `## Test plan` (case-insensitive on "Test plan", `##` exact).
+2. Collect every subsequent line until the next `##`-level heading or end of body.
+3. From that range, extract lines matching `- [ ]` (with a single space inside the brackets).
+   - Treat `- [x]` and `- [X]` as checked → ignore.
+   - Capture only the bullet's first line of text. If the item wraps onto subsequent
+     indented lines, take just the first line.
+4. Lines matching `- [ ]` that appear *outside* the `## Test plan` section are ignored.
+5. If no `## Test plan` heading is found, record "No `## Test plan` section found" and
+   produce zero unchecked items (this is not an error).
+
+### B. CI status
+
+Run:
+```
+gh pr checks <number> --repo <owner>/<repo>
+```
+
+Capture any check that is failing or pending. Passing/skipped checks are not gaps.
+If `gh pr checks` errors (e.g., no checks configured), record "No CI checks
+configured" and treat as zero CI gaps.
+
+### Output
+
+Write `<thinking_dir>/verification-gaps.md` with two subsections:
+
+```markdown
+# Verification Gaps for PR #<number>
+
+## Unchecked Test plan items
+- <verbatim text of each unchecked item>
+- ...
+(or: "No `## Test plan` section found" / "All Test plan items checked")
+
+## CI status
+- <check name>: <state> — <description>
+- ...
+(or: "No CI checks configured" / "All CI checks passing")
+```
+
+If both subsections are empty (no unchecked items AND no failing/pending checks),
+write a single line: "No verification gaps detected."
+
+### Combined stop condition
+
+If Step 3 found zero comments AND Step 3.5 found no verification gaps, report
+"No review comments or verification gaps found on this PR." and stop.
 
 ## Step 4: Select expert and dispatch for assessment
+
+If Step 3 found zero comments (but verification gaps exist), skip the expert dispatch
+entirely and proceed to Step 4b with an empty comments array. There are no comments
+to classify.
 
 Determine which expert to dispatch based on the files touched by PR comments:
 
@@ -167,7 +230,13 @@ and file locations as the API data).
 
 ## Step 5: Present assessment
 
-Read the expert's assessment and present it grouped by classification:
+Read the expert's assessment (if dispatched) and the verification gaps file, then
+present them grouped by category. Verification Gaps come first because they are
+objective and typically blocking; reviewer feedback follows.
+
+### Verification Gaps
+Read `<thinking_dir>/verification-gaps.md` and present its contents directly. If the
+file says "No verification gaps detected.", omit this section entirely.
 
 ### Actionable Items
 For each actionable comment:
@@ -184,7 +253,10 @@ For each discussion comment:
 ### Informational
 > <count> informational comments (no action needed). See `<thinking_dir>/expert-assessment.md` for details.
 
-Then ask: "Would you like to address the actionable items?"
+Then ask the user, adapting to what was found:
+- If both gaps and actionable items exist: "Would you like to address the actionable items and close out the verification gaps?"
+- If only gaps exist: "Would you like to close out the verification gaps?"
+- If only actionable items exist: "Would you like to address the actionable items?"
 
 If there are discussion items, also ask the user to resolve them. Incorporate their
 decisions into the actionable list.
@@ -200,16 +272,31 @@ If the user says yes:
    git -C <workspace> checkout <headRefName>
    ```
 
-2. **Construct task description** from the actionable items:
+2. **Construct task description** from the verification gaps and actionable items.
+   Assemble in this order, omitting any section that has no items:
+
    ```
-   Address PR #<number> review feedback (<owner>/<repo>):
+   Address PR #<number> (<owner>/<repo>):
+
+   ## Verification gaps to close out
+   <for each unchecked Test plan item:>
+   - <verbatim item text>
+   <for each failing/pending CI check:>
+   - CI: <check name> is <state>
+
+   ## Review feedback to address
    <for each actionable item:>
    - [<file>:<line>] <summary of what to fix>
-   
-   Expert assessment: <thinking_dir>/expert-assessment.md
+
+   Expert assessment: <thinking_dir>/expert-assessment.md (if dispatched)
    PR comments: <thinking_dir>/pr-comments.md
    PR context: <thinking_dir>/pr-context.json
+   Verification gaps: <thinking_dir>/verification-gaps.md
    ```
+
+   If only gaps exist (no actionable items), omit the "Review feedback" section and
+   the assessment-file reference. If only actionable items exist, omit the
+   "Verification gaps" section and the gaps-file reference.
 
 3. **Invoke the workflow skill:**
    ```
