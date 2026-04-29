@@ -83,6 +83,42 @@ When updating status.md, you MUST:
 | <hash> | <summary> | <plan step> | <iteration> |
 ```
 
+**Pre-existing Failures** — add a section if it doesn't exist, then append rows:
+```
+## Pre-existing Failures
+| Test | Classification | Iteration |
+|------|----------------|-----------|
+| <test name> | PRE-EXISTING | <major>.<minor> |
+| <test name> | CANNOT-CLASSIFY | <major>.<minor> |
+| <test name> | UNTRIAGED-CANNOT-CLASSIFY | <major>.<minor> |
+```
+
+This section is created on first invocation and appended to thereafter. Do not overwrite existing rows.
+
+## pre-existing-failures.md
+
+When the session asks you to write or append wider-suite triage findings, write to `<thinking_dir>/pre-existing-failures.md` using this template (create on first write, append rows on subsequent writes):
+
+```markdown
+---
+created: <ISO 8601>
+iteration: <major>.<minor>
+---
+
+# Pre-existing Failures (Wider Suite Triage)
+
+| Test | Suite | Classification | Evidence | Sub-step |
+|------|-------|----------------|----------|----------|
+| <test name> | <suite> | PRE-EXISTING | 3/3 fail without source changes | <major>.<minor>-tester-wider |
+| <test name> | <suite> | CANNOT-CLASSIFY | flake (2 pass / 1 fail) without source changes | <major>.<minor>-tester-wider |
+| <test name> | <suite> | UNTRIAGED-CANNOT-CLASSIFY | exceeded triage budget | <major>.<minor>-tester-wider |
+```
+
+Classifications:
+- `PRE-EXISTING` — failed 3/3 times without source changes (not caused by this PR)
+- `CANNOT-CLASSIFY` — flake during triage re-run (mixed pass/fail without source changes)
+- `UNTRIAGED-CANNOT-CLASSIFY` — over the per-iteration triage budget (not investigated)
+
 ## Command Rules
 
 **NEVER use brace expansion** in mkdir or any command. Claude Code prompts the user for approval on brace expansion.

@@ -41,6 +41,29 @@ This applies to ALL git operations including submodule work. For submodules at `
 3. **Branch management** — create branches that match the repo's existing naming convention
 4. **Regression tracking** with the Troubleshooter (bisect, log analysis)
 5. **User review flow** — snapshot, soft-reset, and restore commits
+6. **Phase 2.5 triage stash/restore** — selectively stash source-only changes so the tester can re-run failing wider-suite tests against an unmodified tree, then restore the stash afterward (see Phase 2.5 Triage Stash below)
+
+## Phase 2.5 Triage Stash
+
+During Phase 2.5 (Wider Suite Execution), the session may dispatch you to stash source-only PR changes while preserving test-file changes, so the tester can determine whether a failing wider-suite test is a regression or pre-existing.
+
+The session provides **explicit path lists** — do NOT use heuristics to decide which paths are source vs test:
+- "Source paths to stash" — pass these to `git stash push -- <paths>`
+- "Test paths to PRESERVE" — these MUST remain modified after the stash
+
+**Stash command:**
+```bash
+git -C <workspace> stash push -m "phase-2.5-triage" -- <space-separated source paths>
+```
+
+After stashing, verify with `git -C <workspace> diff --name-only` that test paths are still listed as modified. Report the stash ref (`stash@{0}`) so the session can pop it later.
+
+**Restore command:**
+```bash
+git -C <workspace> stash pop <stash ref>
+```
+
+If `stash pop` fails with conflicts: do NOT attempt to resolve. Report the conflict and the failure to the session — this is a hard error that requires user escalation.
 
 ## Branch Naming — Convention Discovery
 

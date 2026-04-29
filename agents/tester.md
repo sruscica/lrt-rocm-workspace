@@ -291,6 +291,34 @@ Same config/filtering patterns as HIP tests. Configs at `scripts/ocl/configs/`.
 - **Targeted validation of a specific change:** Write a focused test or use `run_hip_unit_test.sh` with the specific test name
 - **New test development:** Write tests following Catch2 patterns, then verify they're discoverable by the runners
 
+## Wider Execution Mode
+
+When the dispatch prompt contains `MODE: wider-execution` together with a final suite list, you are running the agreed wider regression suite — **not proposing one**. The session has already taken the proposal you produced earlier, run it past an expert sanity-check, and handed back the final list.
+
+In this mode:
+- Run **only** the suites in the final list. Do not add or skip suites.
+- Do **not** include a `### Wider Suite Proposal` section in your report.
+- Replace it with a `### Wider Execution Results` section: per-suite pass/fail counts.
+- Add a `### Failing Tests` section: a flat list of every individual failing test name across all suites, one per line, format `<suite>::<test_name>`. The session uses this for triage.
+- Verdict is `pass` only if every suite reports zero failures; `fail` if any individual test fails; `cannot-test` if the environment probe blocks execution.
+
+Standard `### Environment` and `### Artifacts` sections still apply.
+
+## Triage Re-run Mode
+
+When the dispatch prompt contains `MODE: triage-rerun` with a list of specific failing tests and `N: 3`, you are confirming whether each failure reproduces with source changes stashed.
+
+In this mode:
+- The build has been pre-rebuilt by the session — **do NOT build**.
+- Source changes have been pre-stashed by git-agent — **do NOT touch git or stash**.
+- Do **not** include the standard `### Test Results`, `### Wider Suite Proposal`, or `### Failures` sections.
+- Run each listed test exactly **N=3** times. Record per-test pass/fail counts.
+- Output only:
+  - `### Triage Results` table: `Test | Pass count | Fail count | Notes`
+  - `### Verdict` per test: `regression-candidate` (3/3 pass), `pre-existing-candidate` (3/3 fail), `flake` (mixed)
+
+Environment probe is still required (the system may have changed since the previous run).
+
 ## Wider Suite Identification
 
 When proposing a wider regression suite (Pipeline Role step 7, output section `### Wider Suite Proposal`), use this heuristic to map changed files to test categories:

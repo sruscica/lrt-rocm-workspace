@@ -449,6 +449,31 @@ Each test case is a mock prompt dispatched through the pipeline, with expected r
   - Expected: PR created with `--base <branch_base>`, title reflects high-level goal (not commit message), test plan items pre-checked for pipeline-verified items, verification section present
   - Pass criteria: gh pr create includes --base flag; PR body has [x] checked items; verification section references test results
 
+- [ ] **W-E20**: Phase 2.5 entry — wider suite proposed, targeted passed
+  - Setup: Tester report has `### Wider Suite Proposal` with at least one suite; Build Status is BUILT; Test Status is TESTED (targeted-pass)
+  - Expected: Phase 3 Step 0.5 enters Phase 2.5 — dispatches expert sanity-check (HIP or Bash by file extension), then computes final suite list (subtracting PR-modified test files), then dispatches tester with `MODE: wider-execution` and sub-step `<major>.<minor>-tester-wider`
+  - Pass criteria: expert sanity-check dispatched first; tester dispatched in wider-execution mode; suite list excludes PR-modified test files
+
+- [ ] **W-E20b**: Phase 2.5 re-entry guard — skip if already executed in this major iteration
+  - Setup: Wider suite already executed once this major iteration (Test Status updated to wider-pass | regression | pre-existing-flagged | cannot-classify); Phase 3 re-entered (e.g., reviewer pass after fixup)
+  - Expected: Phase 3 Step 0.5 detects the existing wider-suite outcome and skips Phase 2.5
+  - Pass criteria: no second wider tester dispatch; pipeline proceeds directly to Phase 3 user presentation
+
+- [ ] **W-E20c**: Phase 2.5 triage — regression classification
+  - Setup: Wider tester returns failing tests; per-test triage loop runs (stash source → rebuild → triage rerun N=3 → restore → rebuild back → classify); test passes 3/3 without source changes
+  - Expected: Test classified as `regression-candidate`; Test Status set to `TESTED (regression)`; troubleshooter dispatched same iteration with sub-step `<major>.<minor>-troubleshooter`
+  - Pass criteria: git-agent stash/restore both invoked; build-expert invoked twice (rebuild + cleanup rebuild); troubleshooter dispatched in same major iteration
+
+- [ ] **W-E20d**: Phase 2.5 triage — pre-existing classification
+  - Setup: Wider tester returns failing test; triage rerun shows test fails 3/3 without source changes
+  - Expected: Test classified as `pre-existing-candidate`; logged to `pre-existing-failures.md` with classification PRE-EXISTING and to status.md Pre-existing Failures section; Test Status set to `TESTED (pre-existing-flagged)`; pipeline continues to Phase 3
+  - Pass criteria: pre-existing-failures.md row written by note-taker; status.md Pre-existing Failures section updated; no troubleshooter dispatch; pipeline proceeds
+
+- [ ] **W-E20e**: Phase 2.5 triage budget — over budget marks UNTRIAGED-CANNOT-CLASSIFY
+  - Setup: Wider tester returns more failures than the per-iteration triage budget (>2)
+  - Expected: Session skips triage for the over-budget tests; logs them as UNTRIAGED-CANNOT-CLASSIFY in pre-existing-failures.md and status.md; Test Status set to `TESTED (cannot-classify)`
+  - Pass criteria: no triage dispatches for over-budget tests; correct classification recorded; pipeline proceeds without troubleshooter
+
 ### 5.5 PR Feedback Skill
 
 - [ ] **W-F1**: PR feedback expert assessment — correct classification

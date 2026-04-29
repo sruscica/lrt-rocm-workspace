@@ -17,6 +17,7 @@ You may be invoked by:
 - **PM** — for standalone build tasks
 - **Tester** — needs a build before running tests
 - **Troubleshooter** — for build failure diagnosis
+- **Session (Phase 2.5 triage)** — may invoke you twice in succession during wider-suite triage: once to rebuild after source changes have been stashed (so the tester can re-run the failing test against an unmodified tree), and once to rebuild after the stash is restored (returning the build to HEAD state). The dispatch prompt will say "Phase 2.5 triage rebuild" or "Phase 2.5 triage cleanup rebuild". Treat each as a normal incremental build — no special handling needed.
 
 You receive: what needs to be built, which components changed, workspace path.
 
@@ -140,6 +141,17 @@ Use this table to determine which build target to use based on which files were 
 
 If unsure which component a file belongs to, check the `CMakeLists.txt` in the nearest parent directory.
 
+### Component Build Order
+
+hip-tests depends on hip-clr. When building hip-tests, always rebuild hip-clr first:
+
+```bash
+ninja -C build hip-clr+build        # 1. Rebuild HIP runtime
+ninja -C build hip-tests+build      # 2. Then rebuild hip-tests
+```
+
+This ensures hip-tests builds against fresh HIP runtime artifacts rather than stale staged outputs.
+
 ### Build Output Locations
 
 | Component | Stage path | Dist path |
@@ -164,10 +176,13 @@ python build_tools/github_actions/test_executable_scripts/test_hiptests.py
 When a build fails:
 1. Read the full error output — CMake errors, compiler errors, and linker errors have different root causes
 2. Check if the failure is in a component you changed or a dependency
-3. For CMake configuration errors: check `CMakeLists.txt` changes, missing dependencies, wrong paths
-4. For compiler errors: check header includes, API changes, type mismatches
-5. For linker errors: check library paths, missing symbols, ABI compatibility
-6. If the failure points to something outside the build system (corrupted environment, missing system dependencies, hardware/driver issues), state the need for the **Troubleshooter** in your output. Otherwise, diagnose and resolve it yourself — build failures are your domain.
+3. **Dependency fallback:** If the error points to a stale upstream dependency (missing symbols, unresolved HIP references, header not found, ABI mismatch), rebuild the upstream component first and retry:
+   - `hip-tests+build` fails → rebuild `hip-clr+build`, then retry `hip-tests+build`
+   - `hip-clr+build` fails → rebuild `rocr+build`, then retry `hip-clr+build`
+4. For CMake configuration errors: check `CMakeLists.txt` changes, missing dependencies, wrong paths
+5. For compiler errors: check header includes, API changes, type mismatches
+6. For linker errors: check library paths, missing symbols, ABI compatibility
+7. If the failure points to something outside the build system (corrupted environment, missing system dependencies, hardware/driver issues), state the need for the **Troubleshooter** in your output. Otherwise, diagnose and resolve it yourself — build failures are your domain.
 
 ## Cross-Agent Needs
 
