@@ -464,6 +464,11 @@ Each test case is a mock prompt dispatched through the pipeline, with expected r
   - Expected: Test classified as `regression-candidate`; Test Status set to `TESTED (regression)`; troubleshooter dispatched same iteration with sub-step `<major>.<minor>-troubleshooter`
   - Pass criteria: git-agent stash/restore both invoked; build-expert invoked twice (rebuild + cleanup rebuild); troubleshooter dispatched in same major iteration
 
+- [ ] **W-E20k**: Phase 2.5 regression path → Phase 2 re-entry includes troubleshooter output in PM dispatch
+  - Setup: Phase 2.5 triage classifies a wider-suite test as `regression-candidate` and Step 7a dispatches the troubleshooter, which writes its output to `<thinking_dir>/investigations/<major>.<minor>-troubleshooter.md`. Status.md now has `Test Status: TESTED (regression)`, `Build Status: NOT BUILT`. Session re-enters Phase 2.
+  - Expected: The Regression re-entry invariant in Phase 2 fires. The session reads the most recent file from `<thinking_dir>/investigations/`, skips LOOP step 1 (no agent dispatch), and enters the LOOP at step 3 with the troubleshooter output as agent_output sent to PM. Major iteration is NOT incremented. PM routes to planner or implementer.
+  - Pass criteria: PM dispatch on re-entry includes the troubleshooter output as agent_output (not omitted, not replaced with a generic "regression detected" string); no specialist dispatch occurs between Phase 2.5 Step 7a and the PM dispatch; iteration counters carry forward unchanged.
+
 - [ ] **W-E20d**: Phase 2.5 triage — pre-existing classification
   - Setup: Wider tester returns failing test; triage rerun shows test fails 3/3 without source changes
   - Expected: Test classified as `pre-existing-candidate`; logged to `pre-existing-failures.md` with classification PRE-EXISTING and to status.md Pre-existing Failures section; Test Status set to `TESTED (pre-existing-flagged)`; pipeline continues to Phase 3

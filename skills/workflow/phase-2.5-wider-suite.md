@@ -293,7 +293,7 @@ After dispatching troubleshooter:
 - Update status.md `Test Status: TESTED (regression)`
 - Reset Build Status to `NOT BUILT` (next code change will rebuild)
 - Note-taker writes any PRE-EXISTING / CANNOT-CLASSIFY entries to `pre-existing-failures.md` (carry-forward to next iteration)
-- Send troubleshooter output back to PM via "Ask PM What's Next" — return to main Phase 2 loop for next-step routing
+- **Re-enter Phase 2.** Specifically: re-enter Phase 2 with `Test Status: TESTED (regression)` in status.md and the troubleshooter output sitting in `<thinking_dir>/investigations/`. The session-level invariant at Phase 2's entry (see SKILL.md "Regression re-entry invariant") detects this state and skips LOOP step 1, going straight to LOOP step 3 (send troubleshooter output to PM as agent_output). Do NOT increment the major iteration here — Phase 2.5 triage is part of the same major iteration as the regression-introducing code.
 
 The PM typically routes to planner or implementer to fix the regression. The loop continues until reviewer + targeted tester pass again. Phase 2.5 then re-enters (the Re-entry Guard was cleared by Test Status Reset on the reviewer-rejection-style cycle, OR is N/A if a major iteration increment occurred).
 

@@ -274,7 +274,21 @@ Classification — normalize to one of `design`, `bug`, `script`, `knowledge`:
 
 ### Phase 2: Main Dispatch Loop
 
-Set `iteration = "1.0"`, `major = 1`, `minor = 0`, `previous_agent = ""`.
+**Entry:** Phase 2 is entered fresh from Phase 1, OR re-entered from Phase 2.5 Step 7a after a regression is confirmed during wider-suite triage. The two entry paths share the same loop body but have different setup:
+
+- **Fresh entry (from Phase 1):** Set `iteration = "1.0"`, `major = 1`, `minor = 0`, `previous_agent = ""`. Dispatch the starting agent (LOOP step 1) and proceed normally.
+- **Regression re-entry (from Phase 2.5 Step 7a):** Status.md already reflects prior-iteration state — `Test Status: TESTED (regression)`, `Build Status: NOT BUILT`. The troubleshooter has already run in Phase 2.5 and its output sits in `<thinking_dir>/investigations/`. Do NOT reset iteration counters or `previous_agent` — they carry forward.
+
+**Regression re-entry invariant (session enforcement):**
+On entry to Phase 2, read `Test Status` from status.md.
+- If `TESTED (regression)`: this is a Phase 2.5 Step 7a re-entry. The session MUST:
+  1. Read the most recent troubleshooter output file from `<thinking_dir>/investigations/` (sorted by mtime, newest first).
+  2. Skip LOOP step 1 (do NOT re-dispatch the agent — troubleshooter already ran in Phase 2.5).
+  3. Enter the LOOP at step 3, sending the troubleshooter output to PM as the agent output.
+  4. PM (now seeing `Test Status: TESTED (regression)` in status.md plus the troubleshooter findings as agent_output) routes to planner or implementer.
+
+  Without this invariant, PM has no signal that the new iteration is regression-driven and may misroute.
+- Otherwise (any other Test Status, including `NOT TESTED`, `TESTED (targeted-pass)`, etc.): fresh entry path. Dispatch the starting agent normally and enter the loop at step 1.
 
 **Dispatch the starting agent and enter the loop:**
 
