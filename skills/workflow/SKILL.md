@@ -23,6 +23,16 @@ You (session) ── holds Agent tool, runs this loop
 
 The PM makes routing decisions. You execute them. Agents communicate through files in the thinking directory — never through conversation history.
 
+## User Input Protocol
+
+Before any user-facing prompt during the workflow — confirmations, branch base selection, escalation questions, review offers, push/PR questions, or any AskUserQuestion — the session MUST display the READY FOR INPUT banner. This tells the user the pipeline has paused and is waiting for their input.
+
+```
+bash <plugin_root>/hooks/generate-banner.sh > /tmp/.claude-banner.txt
+```
+
+Then read `/tmp/.claude-banner.txt` and print its contents as plain text (not inside a code block). The `<plugin_root>` is the directory containing the `hooks/` folder — resolve it from the skill's base directory (two levels up from `skills/workflow/`).
+
 ## Dispatch Loop
 
 Follow these steps exactly. The user's task is in `$ARGUMENTS`.
@@ -39,6 +49,35 @@ printenv THEROCK_WORK_DIR PROJECT AMD_GPU_ARCH USER
 test -f /.dockerenv && echo "DOCKER=yes" || echo "DOCKER=no"
 git -C <workspace> rev-parse --abbrev-ref HEAD 2>/dev/null || echo "NO_BRANCH"
 ```
+
+**GH CLI authentication probe:**
+
+After gathering environment info, probe which GitHub account can access the workspace's remote. This prevents auth failures during Phase 3 (push/PR) and post-workflow `gh` operations.
+
+```
+1. Extract <owner>/<repo> from the workspace's git remote:
+   git -C <workspace> remote get-url origin
+   Parse the owner/repo from the SSH or HTTPS URL.
+
+2. Check gh auth status to see available accounts.
+
+3. Test the active account's access:
+   gh api repos/<owner>/<repo> --jq '.full_name'
+
+4. If that fails (e.g., GH_TOKEN points to wrong account):
+   - Read ~/.config/gh/hosts.yml to find other authenticated accounts
+   - For each account, test access using its token:
+     GH_TOKEN=<token> gh api repos/<owner>/<repo> --jq '.full_name'
+   - Store the first working token as <gh_token>
+
+5. If no account has access, or gh is not installed:
+   - Set <gh_token> = "" (empty)
+   - Warn the user: "No GitHub account with access to <owner>/<repo> detected.
+     Push and PR creation may fail. You can fix this with `gh auth login`."
+   - Do NOT block the pipeline — GH auth is only needed in Phase 3.
+```
+
+Store `<gh_token>` (may be empty) and `<owner>/<repo>` for use in Phase 3 and post-workflow operations.
 
 Then dispatch the PM Orchestrator with all info pre-provided:
 
@@ -694,11 +733,12 @@ intact for the implementer to build on.
 For knowledge tasks (no code changes): skip this step. Done.
 
 Detect if a PR already exists for this branch. If the task description references
-a `pr-context.json`, read the PR number from it directly. Otherwise, query GitHub:
+a `pr-context.json`, read the PR number from it directly. Otherwise, query GitHub
+(prefix with `GH_TOKEN=<gh_token>` if a non-default token was stored in Phase 1):
 ```
 gh api repos/<owner>/<repo>/pulls --jq '.[] | select(.head.ref == "<branch_name>") | {number, url}' -q 'state=open'
 ```
-Extract `<owner>/<repo>` from the workspace's git remote if not already known.
+Use `<owner>/<repo>` stored from the Phase 1 GH auth probe.
 
 If a PR exists: ask "Would you like to push to update PR #<number>?"
 If no PR exists: ask "Would you like to push the branch and create a PR?"
@@ -757,10 +797,17 @@ If yes:
 
 3c. Dispatch Git Agent to push (and create PR if needed):
 
+    **GH token handling:** If `<gh_token>` was stored in Phase 1 (non-empty, different
+    from the default GH_TOKEN), include this instruction in the Git Agent prompt:
+    "For all `gh` commands, prefix with: GH_TOKEN=<gh_token>"
+    This ensures the Git Agent uses the correct GitHub account for API operations.
+    Git push uses SSH keys and is unaffected by GH_TOKEN.
+
     IF an existing PR was detected:
       Agent(subagent_type: "git-agent", prompt: """
       Push the current branch to update the existing PR.
       Working directory: <workspace>.
+      <if gh_token: "For all gh commands, prefix with: GH_TOKEN=<gh_token>">
 
       Push: git push origin <branch_name>
       Report success when done.
@@ -770,6 +817,7 @@ If yes:
       Agent(subagent_type: "git-agent", prompt: """
       Push the current branch and create a pull request.
       Working directory: <workspace>.
+      <if gh_token: "For all gh commands, prefix with: GH_TOKEN=<gh_token>">
 
       1. Push: git push -u origin <branch_name>
       2. Create PR targeting <branch_base> with exactly this title and body:
@@ -854,6 +902,11 @@ If yes:
 If `git push` or `gh pr create` fails (e.g., no GitHub remote, no `gh` auth,
 permission denied), inform the user of the error and the branch name so they
 can push/create the PR manually. Do not retry.
+
+**Post-workflow GH operations:** If the user requests `gh` operations after the
+workflow completes (e.g., `gh pr merge`), use the stored `<gh_token>` from
+Phase 1 by prefixing commands with `GH_TOKEN=<gh_token>`. This avoids the
+session having to rediscover the correct account.
 
 ## When to Use This vs. Other Skills
 
