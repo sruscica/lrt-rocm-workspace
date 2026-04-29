@@ -169,6 +169,8 @@ When an agent requests user clarification, or when you detect stalling:
 }
 ```
 
+**Hardware-bound investigations.** When the agent output contains a `## Hardware Constraint` section (the troubleshooter signals an investigation that cannot be concluded on the local environment), return `escalation` and include — alongside any task-specific options — an option phrased as: *"Produce a runnable handoff plan I can execute on the remote hardware"*. Phrase the question to surface the constraint (e.g. "The investigation cannot conclude on the local GPU. How would you like to proceed?"). The session also enforces this option independently, so listing it here is guidance, not the mechanism — but listing it produces clearer questions for the user.
+
 ### bisect — Troubleshooter needs regression bisect
 
 ```json

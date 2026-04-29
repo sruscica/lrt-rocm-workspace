@@ -377,6 +377,16 @@ Each test case is a mock prompt dispatched through the pipeline, with expected r
   - Expected: tester or build-expert detects mismatch
   - Pass criteria: build-expert dispatched to rebuild before testing
 
+- [ ] **W-E13b**: Hardware-bound investigation → handoff plan offered
+  - Prompt: Bug investigation for a failure reported on a GPU arch the local system doesn't have (e.g. "reproduce ROCM-XXXXX failures reported on MI210" when local GPU is gfx1030)
+  - Expected: troubleshooter cannot reproduce locally and emits `## Hardware Constraint` section in its output. PM returns `escalation`. Session detects the section and ensures the user's options include "Produce a runnable handoff plan I can execute on the remote hardware" (injecting it if PM omitted it).
+  - Pass criteria:
+    - Session presents the handoff option to the user without re-dispatching PM
+    - If user picks the handoff option, bash-expert is dispatched directly (NOT routed through PM)
+    - bash-expert output is saved to `<thinking_dir>/scripts/<iter>-bash-expert-handoff.md`
+    - Saved plan contains: target environment, setup checks, reproduction commands using compute-utils runners, diagnostic captures, what-to-send-back checklist
+    - troubleshooter report `cannot-test`-style verdicts are NOT used (this is investigation outcome, not post-impl test)
+
 ### 5.4 Agent Handoff and Pipeline Control
 
 - [ ] **W-E14**: Cross-agent request — hip-expert needs tester

@@ -62,6 +62,23 @@ You cannot dispatch agents directly. State your needs in your output:
 
 The pipeline will dispatch the requested agent and re-dispatch you with the results.
 
+## Test Reproduction
+
+When reproducing failures in **hip-tests** (Catch2-based unit tests), prefer the team's `compute-utils` test runners over manual binary invocation. They apply the same env, timeout, and result-capture conventions used by production CI, so a "passes locally" result obtained via the runner is a stronger signal than one from hand-rolled `LD_LIBRARY_PATH` + binary execution.
+
+Primary reproduction tools (see `agents/tester.md` §compute-utils Test Runners for full detail, options, and config layout — do not duplicate that knowledge here):
+
+- `compute-utils/scripts/hip_test/run_hip_unit_test.sh` — single test case
+- `compute-utils/scripts/hip_test/run_hip_executable.sh` — all tests in one binary (use to expose state-leak / test-ordering bugs)
+- `compute-utils/scripts/hip_test/run_hip_test_category.sh` — full category (e.g. `memory`)
+
+**When manual invocation is appropriate** (and what to note in your report when you skip the runners):
+- Wrapping in `rocgdb` or `valgrind` to capture a stack trace — the runners don't expose a debugger pre-hook
+- Running with non-default env probes (e.g. toggling `HSA_XNACK`) for hypothesis testing
+- The failing test isn't part of the standard hip-tests tree (e.g. a one-off reproducer)
+
+In any of those cases, briefly note in the Investigation Log *why* the runner wasn't used, so the result remains comparable to CI.
+
 ## Bisect
 
 When you determine a bisect is needed to find a regression:
@@ -92,3 +109,19 @@ Concrete fix. If it's a code change, describe it specifically. If it requires ar
 
 ### Expert Consultation
 Did you request the HIP Expert? If yes, summarize what they said and how it informed your investigation. Reference their analysis file.
+
+### Hardware Constraint (only when applicable)
+
+Include this section **only** when the investigation cannot conclude on the local environment because the required hardware, driver mode, or system configuration is not available — for example: bug reported on gfx90a but local GPU is gfx1030, multi-GPU test but only one GPU present, XNACK-required path but XNACK is not enabled in the local KFD.
+
+Use exactly this header (`## Hardware Constraint`) — the session detects it to offer the user a structured handoff for executing the investigation on remote hardware.
+
+Under the header, populate:
+
+- **What's missing locally** — one line, concrete (e.g. "gfx90a / MI210", "second GPU on same NUMA node", "XNACK=1 capable kernel + KFD").
+- **Why local results are not authoritative** — short explanation of the code-path divergence (e.g. "gfx1030 reports `hipDeviceAttributeManagedMemory=1` via software fallback; the bug is in the XNACK page-migration path which only gfx90a exercises").
+- **What needs to be observed on the target hardware** — explicit list (e.g. "Catch2 `--reporter console --success` for each failing test", "rocgdb stack trace for the SEGFAULT", "`dmesg` around failure", "confirm whether SEGFAULT happens in isolation or only in the full ctest run").
+- **Recommended environment** — env vars / config to probe (`HSA_XNACK`, `HSA_ENABLE_SDMA`, `DEBUG_HIP_MEM_POOL_VMHEAP`, etc.) and any non-default values to try.
+- **Tests / binaries involved** — exact ctest names + binary paths so the same set can be invoked on the remote system without re-deriving them.
+
+Do not produce the runnable handoff plan yourself — the session will offer that to the user as an explicit option after your investigation completes.

@@ -356,10 +356,33 @@ LOOP:
        - BREAK LOOP
 
      IF type = "escalation":
+       - Hardware-bound handoff enforcement (session guarantee — do BEFORE
+         presenting options to the user):
+         IF the most recent specialist output contains a section header
+         "## Hardware Constraint":
+           IF PM's options list does NOT already include an option whose text
+           contains the word "handoff" (case-insensitive):
+             Append this exact option to PM's options list:
+               "Produce a runnable handoff plan I can execute on the remote hardware"
+           Set hardware_handoff_offered = true
+         ELSE:
+           Set hardware_handoff_offered = false
        - Present PM's question and options to the user
-       - Send user's answer back to PM
-       - PM returns new routing
-       - CONTINUE LOOP
+       - IF hardware_handoff_offered AND user picked the handoff option:
+         - Do NOT route the answer back to PM. Dispatch bash-expert directly
+           using the Hardware Handoff Dispatch template (see "Hardware Handoff
+           Dispatch" subsection below).
+         - After bash-expert finishes, save its output via note-taker to
+           <thinking_dir>/scripts/<iteration>-bash-expert-handoff.md
+         - Tell the user where the handoff plan was written and ask whether
+           to continue the pipeline (e.g. with another agent) or end here.
+         - If they end → go to Phase 3 (Completion Flow), BREAK LOOP
+         - Otherwise treat their direction as a new task input and re-dispatch
+           PM for fresh routing.
+       - ELSE:
+         - Send user's answer back to PM
+         - PM returns new routing
+         - CONTINUE LOOP
 
      IF type = "bisect":
        - Run the Bisect Inner Loop (see below)
@@ -611,6 +634,80 @@ When PM returns `type: "bisect"`:
 ```
 
 No PM validation per bisect step — the inner loop is mechanical.
+
+### Hardware Handoff Dispatch
+
+Triggered from the escalation handler when the user picks the
+"Produce a runnable handoff plan" option after a `## Hardware Constraint`
+investigation. Goal: produce a self-contained plan the user can execute on
+the remote hardware (or hand to someone who has access) without re-deriving
+test names, env vars, binaries, or expected observations.
+
+```
+Agent(subagent_type: "bash-expert", prompt: """
+You are the Bash Expert in the ROCm Agent Pipeline.
+You do NOT have the Agent tool.
+
+COMMAND RULES (mandatory):
+- NEVER use `cd /path && git ...` → use `git -C /path ...`
+- NEVER use `echo "$VAR"` or `printf ... "$VAR"` → use `printenv VAR`
+- NEVER use brace expansion `{a,b,c}` → spell out each argument
+- NEVER use `$VAR` or `$?` in any command → use `printenv VAR` or `cmd || echo FAILED`
+
+Workspace: <workspace>
+Thinking directory: <thinking_dir>
+Iteration: <iteration>
+
+Task: Produce a HARDWARE HANDOFF PLAN for executing a hardware-blocked
+investigation on a remote system. The investigation could not conclude
+locally because of a hardware/configuration constraint.
+
+Read the troubleshooter investigation first:
+  <thinking_dir>/investigations/<latest>-troubleshooter*.md
+Pay special attention to its `## Hardware Constraint` section — that's
+your primary input.
+
+Also read (for canonical test runner usage):
+  <plugin_root>/agents/tester.md  (§compute-utils Test Runners)
+
+Produce a single markdown document with these sections, in this order:
+
+1. **Target Environment** — exactly what hardware/config the operator must
+   provide (GPU arch, driver mode, XNACK setting, GPU count, OS where it
+   matters). Pull from the troubleshooter's "What's missing locally".
+2. **Setup Checks** — copy-pasteable commands the operator runs FIRST to
+   confirm the target system actually meets the requirements
+   (`rocminfo | grep -E 'gfx|xnack'`, `nvidia-smi`-equivalent, env probes).
+   Each check shows expected output.
+3. **Reproduction Commands** — for every test/binary listed in the
+   troubleshooter's "Tests / binaries involved", produce the exact runner
+   invocation. Prefer `compute-utils/scripts/hip_test/run_hip_unit_test.sh`
+   etc. (see tester.md). For each, show: full command, expected exit code,
+   how to capture output (`-o <file>`), and what a "matches the reported
+   bug" outcome looks like vs "does not reproduce".
+4. **Diagnostic Captures** — for the SEGFAULT / hang / undefined-behavior
+   cases the troubleshooter flagged, the rocgdb / coredump / dmesg /
+   strace incantations needed. These ARE the cases manual invocation is
+   appropriate for — make that explicit.
+5. **What to Send Back** — a numbered checklist of artifacts the operator
+   should return (full Catch2 console+success output per test, stack
+   traces, dmesg snippets, the env they ran under). The pipeline will
+   resume from these.
+6. **Local-vs-Remote Divergence Notes** — restate, briefly, why local
+   results were not authoritative, so a reader who only sees this plan
+   understands why running it remotely is necessary.
+
+Write the plan to:
+  <thinking_dir>/scripts/<iteration>-bash-expert-handoff.md
+
+Keep the plan executable — operator should be able to copy commands
+verbatim. Do NOT include `$VAR` expansions in any command in the plan;
+use the same expansion-safe forms as the rules above.
+""")
+```
+
+The session does NOT route this output through the PM. It saves the
+result, tells the user where to find it, and asks for direction.
 
 ### Loop Control
 
