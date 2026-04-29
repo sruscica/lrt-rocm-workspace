@@ -573,7 +573,7 @@ After every tester dispatch completes, the session MUST update status.md `Test S
 - Tester verdict `fail` → `Test Status: TESTED (targeted-fail)`
 - Tester verdict `cannot-test` → `Test Status: CANNOT TEST`
 
-The wider-suite outcome states (`TESTED (wider-pass)`, `TESTED (regression)`, `TESTED (pre-existing-flagged)`, `TESTED (cannot-classify)`) are reserved for future phases that add wider-suite execution and triage. In the current phase, the tester proposes a wider suite in its output but does not run it; the proposal is informational only.
+The wider-suite outcome states (`TESTED (wider-pass)`, `TESTED (regression)`, `TESTED (pre-existing-flagged)`, `TESTED (cannot-classify)`) are set by Phase 2.5 (Wider Suite Execution). The targeted-pass tester run produces a Wider Suite Proposal that Phase 2.5 then executes and triages.
 
 ### Bisect Inner Loop
 
@@ -636,7 +636,7 @@ After targeted tester pass + reviewer pass, the session may execute a wider regr
 3. Test Status is `TESTED (targeted-pass)`
 4. The Re-entry Guard below permits entry
 
-**Re-entry Guard:** If Test Status has already been updated to a wider-suite outcome (`TESTED (wider-pass | regression | pre-existing-flagged | cannot-classify)`) within the current major iteration's history, skip Phase 2.5 — wider work is done for this code state. Test Status Reset (on reviewer rejection) or major iteration increment clears the guard.
+**Re-entry Guard:** If Test Status is **currently** a wider-suite outcome (`TESTED (wider-pass | pre-existing-flagged | cannot-classify)`), skip Phase 2.5 — wider work is done for this code state. The guard clears when Test Status transitions back to `TESTED (targeted-pass)` (which happens after a fresh targeted tester run following any code change). `TESTED (regression)` never reaches Phase 3 (it loops back through Phase 2 from Step 7a) so it is not a guard state. Test Status Reset (on reviewer rejection) or major iteration increment also clears it by setting `NOT TESTED`.
 
 If any entry condition fails OR the guard skips entry: Phase 2.5 does nothing. Return to Phase 3 Step 1.
 

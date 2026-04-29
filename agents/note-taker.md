@@ -186,10 +186,10 @@ Transitions (managed by session):
 - `NOT TESTED` → initial state, or reset after reviewer rejection
 - `TESTED (targeted-pass)` → tester ran targeted suite, all passed
 - `TESTED (targeted-fail)` → tester ran targeted suite, ≥1 failed
-- `TESTED (wider-pass)` → [reserved for future phase] both targeted and wider passed
-- `TESTED (regression)` → [reserved for future phase] wider triage = caused by PR
-- `TESTED (pre-existing-flagged)` → [reserved for future phase] wider triage = pre-existing
-- `TESTED (cannot-classify)` → [reserved for future phase] flake split during triage
+- `TESTED (wider-pass)` → wider regression suite all-passed (Phase 2.5)
+- `TESTED (regression)` → Phase 2.5 triage classified ≥1 failure as regression (caused by PR)
+- `TESTED (pre-existing-flagged)` → Phase 2.5 triage classified failures as pre-existing (not caused by PR)
+- `TESTED (cannot-classify)` → Phase 2.5 triage budget exceeded or flake-split during re-run
 - `CANNOT TEST` → environment lacks required capabilities
 
 ## Blockers
