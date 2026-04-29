@@ -933,6 +933,26 @@ The PM typically routes to planner or implementer to fix the regression. The loo
 
 #### Step 8: Pre-existing Failures Logging Format
 
+**8a. Capture Reproduction Context (first write only).**
+
+Before dispatching note-taker for the FIRST write to `pre-existing-failures.md` in this pipeline run, the session gathers reproduction context via Bash:
+
+```
+git -C <workspace> rev-parse HEAD                       → <workspace_head>
+git -C <workspace> rev-parse origin/<branch_base>       → <base_head>  (fallback: "n/a (base unreachable)")
+git -C <workspace> submodule status                     → <submodule_status>  (may be empty)
+printenv AMD_GPU_ARCH                                   → <gpu_arch>  (fallback: "n/a")
+printenv PROJECT                                        → <project>   (fallback: "host")
+```
+
+The test command pattern is the exact tester invocation used in the wider-execution dispatch (Step 3) — record it as `<test_command_pattern>`.
+
+The session passes these values to note-taker on the first dispatch. Subsequent dispatches MUST NOT overwrite the Reproduction Context — they only append failure rows (note-taker enforces this; see `agents/note-taker.md`).
+
+Limitation (documented): if the user rebases mid-pipeline-run, the captured hashes can stale. Triage results remain valid for the captured state; reproduce against `<workspace_head>` (which still exists in the reflog) rather than current HEAD.
+
+**8b. File template.**
+
 Note-taker writes/appends `<thinking_dir>/pre-existing-failures.md`:
 
 ```markdown
@@ -943,6 +963,20 @@ iteration: <major>.<minor>
 
 # Pre-existing Failures (Wider Suite Triage)
 
+## Reproduction Context
+- Workspace: <workspace>
+- Workspace HEAD: <workspace_head>
+- Base branch: <branch_base> @ <base_head>
+- GPU arch: <gpu_arch>
+- Container project: <project>
+- Test command pattern: <test_command_pattern>
+- Submodule state at triage time:
+  ```
+  <submodule_status>
+  ```
+
+## Failures
+
 | Test | Suite | Classification | Evidence | Sub-step |
 |------|-------|----------------|----------|----------|
 | <test name> | <suite> | PRE-EXISTING | 3/3 fail without source changes | <major>.<minor>-tester-wider |
@@ -950,7 +984,9 @@ iteration: <major>.<minor>
 | <test name> | <suite> | UNTRIAGED-CANNOT-CLASSIFY | exceeded triage budget | <major>.<minor>-tester-wider |
 ```
 
-And appends a Pre-existing Failures section to status.md:
+**8c. status.md addendum.**
+
+Note-taker also appends a Pre-existing Failures section to status.md:
 
 ```markdown
 ## Pre-existing Failures
@@ -959,7 +995,7 @@ And appends a Pre-existing Failures section to status.md:
 | <test name> | PRE-EXISTING | <major>.<minor> |
 ```
 
-These failures DO NOT block completion.
+These failures DO NOT block completion. Phase 3 Step 3a.5 reads `pre-existing-failures.md` (including the Reproduction Context block) when constructing the PR.
 
 ### Phase 3: Completion Flow
 
@@ -1117,6 +1153,163 @@ If yes:
     - Review verdict: read from <thinking_dir>/reviews/ (pass/partial/fail)
     Save these as <commit_log>, <test_summary>, <build_summary>, <review_verdict>.
 
+3a.5. Pre-existing Failures Triage (only if Phase 2.5 surfaced any):
+
+    **i. Read triage file and short-circuit:**
+    Check for `<thinking_dir>/pre-existing-failures.md`. If absent OR the
+    `## Failures` table contains zero data rows, skip directly to step 3b
+    with `<known_issues_section>` set to empty string.
+
+    Otherwise, parse the file. Extract:
+    - The Reproduction Context block (workspace, workspace_head, branch_base,
+      base_head, gpu_arch, project, test_command_pattern, submodule_status)
+    - All failure rows (test name, suite, classification, evidence, sub-step)
+
+    **ii. Ask user once: live vs draft mode** (cache as `<issue_mode>`):
+    Use AskUserQuestion. This decision applies to the entire pipeline run.
+
+    Question: "Pre-existing failures were surfaced. How should I handle GitHub
+    issue creation for failures you mark for new-issue tracking?"
+    Options:
+    - "Create issues live" — session runs `gh issue create` directly
+    - "Draft only (manual)" — session emits ready-to-paste issue bodies in the
+      PR description; user creates issues manually later
+
+    Cache the answer as `<issue_mode>` (`live` or `draft`).
+
+    **iii. Per-failure GitHub issue search:**
+    For each failure row, derive the search keywords:
+    - Always include: the test name (or its last path segment if it contains slashes)
+    - Always include: the suite name
+    - For PRE-EXISTING: add `flaky OR failing`
+    - For CANNOT-CLASSIFY: add `flaky`
+    - For UNTRIAGED-CANNOT-CLASSIFY: add `failing`
+
+    Run:
+    ```
+    gh issue list --repo <owner>/<repo> --state open \
+      --search "<test_name> <suite> <classification_keywords>" \
+      --json number,title,url --limit 10
+    ```
+    The `<owner>/<repo>` comes from the same source used for `gh pr create`
+    (parse from `git -C <workspace> remote get-url origin` if not already cached).
+
+    Capture the result list per failure as `<failure>.candidates` (may be empty).
+
+    **iv. Batched per-category user prompt:**
+    Group failures by classification (PRE-EXISTING, CANNOT-CLASSIFY,
+    UNTRIAGED-CANNOT-CLASSIFY). For each NON-EMPTY group, emit ONE
+    AskUserQuestion with `multiSelect: true`. The question lists every
+    failure in the group; each option corresponds to one failure with this
+    label format:
+
+    ```
+    <test_name> (<suite>) — candidates: #<n1> "<title1>", #<n2> "<title2>", ...
+                                       (or "no open issues found")
+    ```
+
+    For each failure the user picks one of:
+    - **Link to existing #N** — paste the issue number
+    - **Create new** — session will create (live) or draft (draft mode)
+    - **Skip** — omit from PR body (default if user dismisses)
+
+    Capture per-failure decisions as `<failure>.decision` and
+    `<failure>.linked_issue` (only for "link to existing").
+
+    **v. Issue creation / drafting:**
+    For each failure with `decision == "create new"`:
+
+    Build the issue title:
+    ```
+    [<classification>] <test_name> failing in <suite>
+    ```
+
+    Build the issue body using this template (substitute live values):
+    ```markdown
+    ## Failure
+    - Test: <suite>::<test_name>
+    - Classification: <classification>
+    - Triage evidence: <evidence>
+    - Detected during: PR #<pr_number_or_pending> pipeline run
+
+    ## Reproduction
+    - Workspace: <workspace>
+    - Workspace HEAD: <workspace_head>
+    - Base branch: <branch_base> @ <base_head>
+    - GPU arch: <gpu_arch>
+    - Container project: <project>
+    - Submodule state at triage time:
+      ```
+      <submodule_status>
+      ```
+    - Test command pattern: <test_command_pattern>
+
+    ## Investigation Hints
+    - Test source file: <derived_test_path or "unknown — search test suite source">
+    - Last commit on test file: <git log -1 --format="%h %s (%ar)" -- <derived_test_path> output, or "unknown">
+    - Suggested next steps:
+      1. Reproduce against base branch alone (without PR changes)
+      2. Re-run with `--repeat 10` to characterize flake rate
+      3. Search recent CI runs for the same failure signature
+
+    ## Cross-references
+    - Surfacing PR: <pr_url_or_branch_name>
+    - Triage data: <thinking_dir>/pre-existing-failures.md
+    ```
+
+    Derive `<derived_test_path>` best-effort from the test name (e.g., for
+    Google Test names `Suite.Case`, search the workspace for `Case` in test
+    sources). If no confident match, use `"unknown — search test suite source"`.
+    Do not block on this — investigation hints are best-effort.
+
+    Then:
+    - **If `<issue_mode>` == "live"**: run
+      ```
+      gh issue create --repo <owner>/<repo> --title "<title>" --body "<body>"
+      ```
+      Capture the returned URL as `<failure>.created_issue_url`.
+      If the call fails, log the error, fall back to draft for this failure
+      (do not block other failures), and continue.
+    - **If `<issue_mode>` == "draft"**: stash the title+body in the session
+      under `<failure>.draft_issue` for inclusion in the PR body.
+
+    **vi. Compose `<known_issues_section>`:**
+    Build a single markdown string with this structure (omit empty subsections):
+
+    ```markdown
+    ## Known Issues Surfaced During This PR
+
+    These tests failed during wider-suite triage and are NOT regressions
+    introduced by this PR (or could not be classified within budget).
+
+    ### Linked to existing issues
+    | Test | Suite | Classification | Issue |
+    |------|-------|----------------|-------|
+    | <test> | <suite> | <classification> | #<N> |
+
+    ### New issues filed
+    | Test | Suite | Classification | Issue |
+    |------|-------|----------------|-------|
+    | <test> | <suite> | <classification> | <created_issue_url> |
+
+    ### Suggested issues (please file manually)
+    <For each draft failure, render:>
+
+    <details>
+    <summary><classification>: <test> (<suite>)</summary>
+
+    **Title:** <issue title>
+
+    **Body:**
+    ```
+    <issue body>
+    ```
+    </details>
+    ```
+
+    Cache the result as `<known_issues_section>`. If the user skipped every
+    failure, set it to empty string.
+
 3b. Dispatch PM to construct PR content:
     Agent(subagent_type: "pm-orchestrator", prompt: """
     ADVISOR MODE. Return ONLY a JSON block, no prose.
@@ -1134,6 +1327,10 @@ If yes:
     - Verification: Brief summary of pipeline results (test count, build
       status, review verdict). Reference the thinking directory for full
       artifacts.
+    - DO NOT include a "Known Issues" section in your body. The session
+      will deterministically append one after your body if pre-existing
+      failures were surfaced. Any `## Known Issues` heading you produce
+      will be stripped to prevent duplicates.
 
     Completion summary: <PM's completion summary from the completion response>
 
@@ -1155,6 +1352,18 @@ If yes:
     This is a content-construction dispatch, not a routing decision.
     Extract `title` and `body` directly from the JSON — full normalization
     is not required.
+
+    **Compose final PR body (deterministic, session-side):**
+    1. Take the PM-returned `body` string.
+    2. If `<known_issues_section>` (from step 3a.5) is non-empty:
+       a. Strip any pre-existing `## Known Issues` heading + its content from
+          the PM body (defensive — PM was instructed to omit, but enforce here).
+          A "section" runs from `## Known Issues...` up to the next `## ` heading
+          or end-of-string.
+       b. Append `<known_issues_section>` to the (possibly stripped) PM body
+          with one blank line of separation.
+    3. Save the result as `<final_body>`. Pass `<final_body>` (NOT the raw PM
+       body) into the Git Agent dispatch in step 3c.
 
 3c. Dispatch Git Agent to push (and create PR if needed):
 
@@ -1186,7 +1395,7 @@ If yes:
       Title: <title from PM>
 
       Body:
-      <body from PM>
+      <final_body>
 
       Use: gh pr create --base <branch_base> --title "..." --body "..."
       Report the PR URL when done.

@@ -474,6 +474,31 @@ Each test case is a mock prompt dispatched through the pipeline, with expected r
   - Expected: Session skips triage for the over-budget tests; logs them as UNTRIAGED-CANNOT-CLASSIFY in pre-existing-failures.md and status.md; Test Status set to `TESTED (cannot-classify)`
   - Pass criteria: no triage dispatches for over-budget tests; correct classification recorded; pipeline proceeds without troubleshooter
 
+- [ ] **W-E20f**: Phase 3 Step 3a.5 — entry skipped when triage file absent or empty
+  - Setup: Pipeline completes Phase 2.5 with NO pre-existing failures (or skipped Phase 2.5 entirely); `<thinking_dir>/pre-existing-failures.md` does not exist or has zero data rows
+  - Expected: Step 3a.5 short-circuits — no `gh issue list` calls, no AskUserQuestion prompts; `<known_issues_section>` set to empty string; PR body equals raw PM body unchanged
+  - Pass criteria: no gh CLI calls for issue search/create; no Known Issues heading appears in final PR body
+
+- [ ] **W-E20g**: Phase 3 Step 3a.5 — Live mode + create new issue
+  - Setup: pre-existing-failures.md has 1 PRE-EXISTING failure with full Reproduction Context; user picks "Create issues live" then "Create new" for the failure
+  - Expected: Session runs `gh issue list --search "<test> <suite> flaky OR failing"`, then runs `gh issue create` with title `[PRE-EXISTING] <test> failing in <suite>` and body containing Reproduction (workspace HEAD, base HEAD, GPU arch, project, submodule status, test command pattern), Investigation Hints, and Cross-references sections; created issue URL appears in PR body's `### New issues filed` table
+  - Pass criteria: gh issue create called with correct title and body containing all required sections; PR body has Known Issues section with new-issues table row; no draft section emitted
+
+- [ ] **W-E20h**: Phase 3 Step 3a.5 — Draft mode emits suggested-issues block
+  - Setup: pre-existing-failures.md has 1 CANNOT-CLASSIFY failure; user picks "Draft only (manual)" then "Create new" for the failure
+  - Expected: Session does NOT call `gh issue create`; final PR body Known Issues section contains a `### Suggested issues (please file manually)` subsection with a `<details>` block containing the rendered title and body
+  - Pass criteria: zero `gh issue create` calls; PR body contains `<details><summary>CANNOT-CLASSIFY: ...` and full body in fenced block; user can copy-paste
+
+- [ ] **W-E20i**: Phase 3 Step 3a.5 — Link to existing issue
+  - Setup: pre-existing-failures.md has 1 PRE-EXISTING failure; `gh issue list` returns issue #4242; user picks "Link to existing #4242"
+  - Expected: No issue created (live mode) or drafted (draft mode); PR body Known Issues section contains `### Linked to existing issues` table with row referencing #4242
+  - Pass criteria: no `gh issue create` call; no draft block; linked-issues table row present with correct issue number
+
+- [ ] **W-E20j**: Phase 3 Step 3a.5 — Mixed categories use batched per-category prompts + duplicate-heading strip
+  - Setup: pre-existing-failures.md has 2 PRE-EXISTING and 1 UNTRIAGED-CANNOT-CLASSIFY failures; PM returned a body that erroneously contains its own `## Known Issues` heading
+  - Expected: Two AskUserQuestion calls (one per non-empty group, multiSelect: true); session strips PM's `## Known Issues` heading and content (up to next `## ` heading) from body before appending session-composed Known Issues section; final PR body contains exactly ONE `## Known Issues Surfaced During This PR` heading
+  - Pass criteria: exactly two AskUserQuestion dispatches in step 3a.5; PM's spurious heading removed; final body has single Known Issues section
+
 ### 5.5 PR Feedback Skill
 
 - [ ] **W-F1**: PR feedback expert assessment — correct classification

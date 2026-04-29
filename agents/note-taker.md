@@ -97,7 +97,9 @@ This section is created on first invocation and appended to thereafter. Do not o
 
 ## pre-existing-failures.md
 
-When the session asks you to write or append wider-suite triage findings, write to `<thinking_dir>/pre-existing-failures.md` using this template (create on first write, append rows on subsequent writes):
+When the session asks you to write or append wider-suite triage findings, write to `<thinking_dir>/pre-existing-failures.md`. The file has two parts: a **Reproduction Context** block (written ONCE on first write) and a **Failures** table (appended row-by-row on every write).
+
+**First write** — file does NOT exist yet. The session passes you Reproduction Context values. Render the full template:
 
 ```markdown
 ---
@@ -107,12 +109,29 @@ iteration: <major>.<minor>
 
 # Pre-existing Failures (Wider Suite Triage)
 
+## Reproduction Context
+- Workspace: <workspace>
+- Workspace HEAD: <workspace_head>
+- Base branch: <branch_base> @ <base_head>
+- GPU arch: <gpu_arch>
+- Container project: <project>
+- Test command pattern: <test_command_pattern>
+- Submodule state at triage time:
+  ```
+  <submodule_status>
+  ```
+
+## Failures
+
 | Test | Suite | Classification | Evidence | Sub-step |
 |------|-------|----------------|----------|----------|
-| <test name> | <suite> | PRE-EXISTING | 3/3 fail without source changes | <major>.<minor>-tester-wider |
-| <test name> | <suite> | CANNOT-CLASSIFY | flake (2 pass / 1 fail) without source changes | <major>.<minor>-tester-wider |
-| <test name> | <suite> | UNTRIAGED-CANNOT-CLASSIFY | exceeded triage budget | <major>.<minor>-tester-wider |
+| <test name> | <suite> | <CLASSIFICATION> | <evidence> | <major>.<minor>-tester-wider |
 ```
+
+**Subsequent writes** — file already exists. The session passes you only new failure rows. You MUST:
+- Read the existing file
+- Append the new rows to the existing `## Failures` table
+- DO NOT touch the Reproduction Context block, even if the session passes new context values (a pipeline rebase mid-run is a known limitation; original context stays as the source of truth for that pipeline run)
 
 Classifications:
 - `PRE-EXISTING` — failed 3/3 times without source changes (not caused by this PR)
