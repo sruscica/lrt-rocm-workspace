@@ -499,6 +499,31 @@ Each test case is a mock prompt dispatched through the pipeline, with expected r
   - Expected: Two AskUserQuestion calls (one per non-empty group, multiSelect: true); session strips PM's `## Known Issues` heading and content (up to next `## ` heading) from body before appending session-composed Known Issues section; final PR body contains exactly ONE `## Known Issues Surfaced During This PR` heading
   - Pass criteria: exactly two AskUserQuestion dispatches in step 3a.5; PM's spurious heading removed; final body has single Known Issues section
 
+- [ ] **W-E22**: Phase 3 Step 3a + 3b + body composition — hardware-tested case appends Environment section
+  - Setup: hardware_tested=yes, gpu_arch=gfx1100, targeted_arch_used=gfx1100, targeted_summary="15/15 passed on gfx1100", no Phase 2.5 wider run
+  - Expected: 3a captures all environment + suite_execution facts; PM 3b prompt receives both blocks; PM body has hardware-test items pre-checked `[x]`; session appends `## Environment` section with GPU arch, project, "Tested on real hardware: yes (arch: gfx1100)" line; final body has exactly ONE `## Environment` heading
+  - Pass criteria: PM prompt contains Environment + Suite execution sections; final body's hardware-test checkboxes are `[x]`; final body contains the appended Environment section; no Known Issues section
+
+- [ ] **W-E22b**: Phase 3 — cannot-test case omits Environment section, leaves hardware boxes unchecked
+  - Setup: hardware_tested=cannot-test, targeted_summary="cannot-test: no GPU detected", AMD_GPU_ARCH unset (resolves to "n/a")
+  - Expected: PM 3b prompt receives `Hardware tested: cannot-test`; PM body has hardware-test items unchecked `[ ]` and Verification text explicitly states hardware testing did not occur; session does NOT append `## Environment` section
+  - Pass criteria: final body's hardware-test checkboxes are `[ ]`; no `## Environment` heading anywhere in final body; Verification mentions hardware testing was not performed
+
+- [ ] **W-E22c**: Phase 3 body composition — strip duplicate Environment heading from PM body
+  - Setup: hardware_tested=yes; PM returned body containing a spurious `## Environment\nfoo bar\n## Verification\n...verification stuff...`
+  - Expected: Session strips PM's `## Environment` section (heading through next `## ` or EOS) before appending session-composed Environment section; `## Verification` content is preserved
+  - Pass criteria: final body contains exactly ONE `## Environment` heading; Verification section content survives the strip
+
+- [ ] **W-E22d**: Phase 3 body composition — both Environment and Known Issues append in correct order
+  - Setup: hardware_tested=yes AND pre-existing-failures.md has 1 PRE-EXISTING failure that user marks as "Link to existing #4242"
+  - Expected: Final body order is PM body → `## Environment` → `## Known Issues Surfaced During This PR`; each section appears exactly once
+  - Pass criteria: scanning the final body, the `## Environment` heading occurs after the last PM-body `## ` heading and before `## Known Issues Surfaced During This PR`; both sections present exactly once
+
+- [ ] **W-E22e**: Phase 3 — wider_ran=no leaves wider-suite Test plan items unchecked
+  - Setup: wider_ran=no (no Phase 2.5 wider tester report exists), hardware_tested=yes, targeted_summary="15/15 passed on gfx1100"; PM body Test plan includes a wider-suite verification item
+  - Expected: PM body's wider-suite Test plan items are unchecked `[ ]`; hardware-test items are `[x]`; Environment section appended
+  - Pass criteria: final body's wider-suite checkboxes are `[ ]`; final body's hardware-test checkboxes are `[x]`; Environment section present
+
 ### 5.5 PR Feedback Skill
 
 - [ ] **W-F1**: PR feedback expert assessment — correct classification

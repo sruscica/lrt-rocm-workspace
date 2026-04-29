@@ -1170,6 +1170,33 @@ If yes:
     - Review verdict: read from <thinking_dir>/reviews/ (pass/partial/fail)
     Save these as <commit_log>, <test_summary>, <build_summary>, <review_verdict>.
 
+    **Environment facts:**
+    - <gpu_arch>            ← printenv AMD_GPU_ARCH (fallback "n/a")
+    - <project>             ← printenv PROJECT (fallback "host")
+    - <hardware_tested>     ← derive from tester report:
+        - "yes" if tester verdict reports a pass/fail count from a real GPU run
+        - "no" if tester deliberately skipped the targeted run (no failures and
+          no run record)
+        - "cannot-test" if tester reported missing GPU / capability
+    - <targeted_arch_used>  ← from tester report (the arch tests actually ran on,
+                              may differ from AMD_GPU_ARCH); "n/a" if
+                              <hardware_tested> != "yes"
+
+    **Suite execution facts:**
+    - <targeted_summary>    ← <test_summary>, restated (e.g.,
+                              "15/15 passed on gfx1100" or "cannot-test: no GPU")
+    - <wider_ran>           ← "yes" if a Phase 2.5 wider tester report exists in
+                              <thinking_dir>/tests/; else "no"
+    - <wider_summary>       ← from Phase 2.5 wider tester verdict (e.g.,
+                              "203/207 passed, 4 failures triaged");
+                              "not run" if <wider_ran> == "no"
+    - <pre_existing_count>  ← row count in <thinking_dir>/pre-existing-failures.md
+                              `## Failures` table; 0 if file absent
+    - <regression_count>    ← rows classified as regression in this iteration
+                              (from triage logs); 0 if Phase 2.5 didn't classify
+                              any (status.md state reaching Phase 3 implies all
+                              regressions were already addressed)
+
 3a.5. Pre-existing Failures Triage (only if Phase 2.5 surfaced any):
 
     **i. Read triage file and short-circuit:**
@@ -1338,12 +1365,21 @@ If yes:
       user set out to accomplish. NOT a commit message. Think "what does
       this PR do for the project?" (under 70 chars)
     - Summary: 2-4 bullets covering the key changes
-    - Test plan: Checklist of verification items. Pre-check (- [x]) any
-      item that the pipeline has already verified. Leave unchecked (- [ ])
-      items that still need manual verification.
+    - Test plan: Checklist of verification items. Each checkbox MUST mirror
+      a concrete pipeline fact from the Environment + Suite execution blocks
+      below. Pre-check (- [x]) ONLY what the pipeline actually verified.
+      - Hardware test items: [x] if hardware_tested == "yes" AND ran on the
+        targeted arch. [ ] if hardware_tested is "no" or "cannot-test".
+      - Build items: [x] if Build status is BUILT. [ ] otherwise.
+      - Wider-suite items: [x] if wider_ran == "yes" AND no regressions
+        remain. [ ] if wider_ran == "no".
     - Verification: Brief summary of pipeline results (test count, build
-      status, review verdict). Reference the thinking directory for full
-      artifacts.
+      status, review verdict). When hardware_tested is "no" or "cannot-test",
+      explicitly state that hardware testing was not performed and why.
+      Reference the thinking directory for full artifacts.
+    - DO NOT include a "## Environment" section in your body. The session
+      will deterministically append one after your body if hardware_tested
+      == "yes". Any `## Environment` heading you produce will be stripped.
     - DO NOT include a "Known Issues" section in your body. The session
       will deterministically append one after your body if pre-existing
       failures were surfaced. Any `## Known Issues` heading you produce
@@ -1362,6 +1398,19 @@ If yes:
     - Review: <review_verdict>
     - Artifacts: <thinking_dir>/
 
+    Environment:
+    - GPU arch: <gpu_arch>
+    - Container project: <project>
+    - Hardware tested: <hardware_tested>
+    - Targeted arch used: <targeted_arch_used>
+
+    Suite execution:
+    - Targeted: <targeted_summary>
+    - Wider suite ran: <wider_ran>
+    - Wider suite: <wider_summary>
+    - Pre-existing failures surfaced: <pre_existing_count>
+    - Regressions caught and fixed: <regression_count>
+
     Respond with ONLY a JSON block:
     {"type":"pr-content", "title":"<high-level PR title, under 70 chars>", "body":"<markdown body with ## Summary, ## Test plan (pre-checked items), and ## Verification sections>"}
     """)
@@ -1371,16 +1420,35 @@ If yes:
     is not required.
 
     **Compose final PR body (deterministic, session-side):**
-    1. Take the PM-returned `body` string.
-    2. If `<known_issues_section>` (from step 3a.5) is non-empty:
+    Final body order: PM body → Environment (if hardware tested) → Known Issues
+    (if Phase 2.5 surfaced any).
+
+    1. Take the PM-returned `body` string as `<working_body>`.
+
+    2. If `<hardware_tested>` == "yes":
+       a. Build `<environment_section>`:
+          ```markdown
+          ## Environment
+          - GPU arch: <gpu_arch>
+          - Container project: <project>
+          - Tested on real hardware: yes (arch: <targeted_arch_used>)
+          ```
+       b. Strip any pre-existing `## Environment` heading + its content from
+          `<working_body>` (defensive — PM was instructed to omit, but enforce
+          here). A "section" runs from `## Environment...` up to the next `## `
+          heading or end-of-string.
+       c. Append `<environment_section>` to `<working_body>` with one blank
+          line of separation.
+
+    3. If `<known_issues_section>` (from step 3a.5) is non-empty:
        a. Strip any pre-existing `## Known Issues` heading + its content from
-          the PM body (defensive — PM was instructed to omit, but enforce here).
-          A "section" runs from `## Known Issues...` up to the next `## ` heading
-          or end-of-string.
-       b. Append `<known_issues_section>` to the (possibly stripped) PM body
-          with one blank line of separation.
-    3. Save the result as `<final_body>`. Pass `<final_body>` (NOT the raw PM
-       body) into the Git Agent dispatch in step 3c.
+          `<working_body>` (defensive). A "section" runs from `## Known Issues...`
+          up to the next `## ` heading or end-of-string.
+       b. Append `<known_issues_section>` to `<working_body>` with one blank
+          line of separation.
+
+    4. Save `<working_body>` as `<final_body>`. Pass `<final_body>` (NOT the raw
+       PM body) into the Git Agent dispatch in step 3c.
 
 3c. Dispatch Git Agent to push (and create PR if needed):
 
