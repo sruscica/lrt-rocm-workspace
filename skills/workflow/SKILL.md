@@ -349,6 +349,8 @@ LOOP:
   3. Send agent output to PM for routing (see "Ask PM What's Next" below)
   4. Parse PM response and act on it:
 
+     **Streak reset (session enforcement):** If PM's `type` is anything OTHER than `fulfill-request`, set `fulfill_request_streak = 0` before processing. Initialize the streak to 0 on first entry to the loop.
+
      IF type = "next-step":
        - Update iteration (session enforcement):
          IF PM says iteration_change = "major": major++, minor = 0
@@ -367,6 +369,28 @@ LOOP:
        - CONTINUE LOOP
 
      IF type = "fulfill-request":
+       - **Loop cap (session enforcement):** Maintain a counter
+         `fulfill_request_streak` that increments on each consecutive
+         `fulfill-request` and resets to 0 whenever PM returns any other
+         type. If `fulfill_request_streak` would exceed 3, do NOT dispatch
+         the target. Instead:
+           - Reset the streak to 0
+           - Display the READY FOR INPUT banner
+           - Ask the user: "PM has requested cross-agent fulfillment 4 times in a row
+             (chain so far: <list of (originator → target) pairs>). This usually
+             means the agents cannot agree on what they need. Continue, change
+             direction, or abort?"
+           - On Continue: increment the streak again and proceed; the cap will
+             re-trigger after 3 more requests.
+           - On Change direction: take the user's input as a new task summary,
+             dispatch PM with type="next-step" context describing the user's
+             redirect.
+           - On Abort: BREAK LOOP and skip to Phase 3 with a status note that
+             the pipeline was aborted mid-fulfill-request chain.
+         The cap protects against unbounded loops where, e.g., the Reviewer
+         requests an expert who requests the Tester who reports a failure that
+         the Reviewer interprets as needing another expert.
+       - Increment `fulfill_request_streak`
        - Dispatch the target agent with PM's context_notes
        - Handle output saving for target agent
        - If then_resume is set: re-dispatch the original agent with
@@ -651,13 +675,16 @@ POST-COMMIT:
 When dispatching the reviewer and Build Status is `BUILD DEFERRED`, include in the reviewer's context:
 "Build was deferred — changes are non-functional only (comments/docs/formatting). Focus on spec compliance and code quality. Build verification is pending after review."
 
-### Build Status Reset
+### Build / Test Status Reset (single trigger, two fields)
 
-When the PM routes back to implementer, planner, or hip-expert after a reviewer rejection (partial/fail-spec/fail), the session MUST update status.md: `Build Status: NOT BUILT`. This ensures stale build state from a prior iteration cannot leak into the next one. The next commit triggers the post-commit sequence, which sets Build Status fresh.
+When the PM routes back to implementer, planner, or hip-expert after a reviewer rejection (`partial`, `fail-spec`, or `fail`), the session MUST update **both** fields in status.md in the same write:
 
-### Test Status Reset
+- `Build Status: NOT BUILT`
+- `Test Status: NOT TESTED`
 
-Same trigger as Build Status Reset. When the PM routes back to implementer, planner, or hip-expert after a reviewer rejection (partial/fail-spec/fail), the session MUST also update status.md: `Test Status: NOT TESTED`. This ensures stale test state from a prior iteration cannot mask a regression introduced by the new code. The next tester dispatch sets Test Status fresh.
+This is one trigger, not two. The fields move together because stale build state masks a non-functional change and stale test state masks a regression introduced by the new code. The next commit's post-commit sequence sets Build Status fresh; the next tester dispatch sets Test Status fresh.
+
+If you ever update one without the other after a reviewer rejection, you have introduced drift. Always write both.
 
 ### Test Status Update After Tester Dispatch
 

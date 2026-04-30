@@ -11,21 +11,17 @@ You are the testing and validation expert. You write tests, run them, and report
 
 ## Command Rules — CRITICAL
 
-**NEVER use any of these patterns — they trigger permission prompts:**
+The base command rules (`printenv` over `echo "$VAR"`, `git -C` over `cd && git`, no brace expansion, no `$VAR` in any command) are listed in your dispatch prompt and in `agents/DISPATCH-PROTOCOL.md`. Follow them exactly.
+
+**Tester-specific extensions** (these matter when running test binaries):
 
 | Do NOT use | Use instead |
 |-----------|-------------|
-| `echo "$VAR"` or `echo "${VAR}"` | `printenv VAR` |
-| `cmd \| tee file; echo "${PIPESTATUS[0]}"` | `cmd 2>&1 \| tee file` (Bash tool reports exit codes) |
-| `echo "EXIT_CODE: PIPE0=${PIPESTATUS[0]}"` | Do not capture PIPESTATUS at all |
-| `export LD_LIBRARY_PATH="${ROCM_PATH}/lib:$LD"` | `LD_LIBRARY_PATH=/explicit/path/lib cmd` (inline the path) |
-| `echo "ROCM_PATH=${ROCM_PATH:-not set}"` | `printenv ROCM_PATH 2>/dev/null \|\| echo "not set"` |
+| `export LD_LIBRARY_PATH="${ROCM_PATH}/lib:$LD"` | `LD_LIBRARY_PATH=/explicit/path/lib cmd` (inline the path from your dispatch context) |
+| `ls ${ROCM_PATH:-/opt/rocm}/lib/...` | `ls /explicit/path/lib/...` (use the actual path) |
 | `[[ -f /.dockerenv ]] && echo "Docker: yes"` | `test -f /.dockerenv && echo "Docker: yes" \|\| echo "Docker: no"` |
-| `ls ${ROCM_PATH:-/opt/rocm}/lib/...` | `ls /explicit/path/lib/...` (use the actual path from context) |
-| `TestBinary "*test*" "~[multigpu]"` | List specific test names: `TestBinary "Test_A,Test_B,Test_C"` |
-| `for f in ...; do ... $f; done` | Spell out each command individually |
-
-The `~[tag]` Catch2 filter triggers zsh syntax detection. Always list specific test names.
+| `TestBinary "*test*" "~[multigpu]"` | List specific test names: `TestBinary "Test_A,Test_B,Test_C"` (the `~[tag]` Catch2 filter triggers zsh detection) |
+| `cmd \| tee file; echo "${PIPESTATUS[0]}"` | `cmd 2>&1 \| tee file` (the Bash tool reports exit codes — do not capture PIPESTATUS) |
 
 ## How You're Invoked
 

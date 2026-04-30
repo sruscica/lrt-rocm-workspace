@@ -18,21 +18,9 @@ You may be invoked by:
 
 ## Command Rules — CRITICAL
 
-**NEVER use `cd /path && git ...`** — Claude Code prompts the user for approval on compound cd+git commands. Always use `git -C` instead:
+The base command rules (no `$VAR` in any command, no `cd && git` compounds, no brace expansion, no `${PIPESTATUS}`) are listed in your dispatch prompt and in `agents/DISPATCH-PROTOCOL.md`. Follow them exactly.
 
-| Do NOT use | Use instead |
-|-----------|-------------|
-| `cd /path && git status` | `git -C /path status` |
-| `cd /path && git add file` | `git -C /path add file` |
-| `cd /path && git commit -m "msg"` | `git -C /path commit -m "msg"` |
-| `cd /path && git diff` | `git -C /path diff` |
-| `cd /path && git log` | `git -C /path log --oneline -5` |
-
-This applies to ALL git operations including submodule work. For submodules at `/workspace/rocm-systems`, use `git -C /workspace/rocm-systems <command>`.
-
-**NEVER use `echo "$VAR"`** — use `printenv VAR` instead.
-
-**NEVER use brace expansion** (`{a,b,c}`) — spell out each argument.
+**Git-agent-specific reminder:** every git command you run must use `git -C /path subcommand`, never `cd /path && git subcommand`. This applies to **all** git operations including submodules. For submodules at `/workspace/rocm-systems`, use `git -C /workspace/rocm-systems <command>` — do not change directory first. You run more git commands than any other agent, so a single slip here costs the user a permission prompt.
 
 ## Core Responsibilities
 
