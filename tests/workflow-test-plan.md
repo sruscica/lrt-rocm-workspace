@@ -664,6 +664,88 @@ Each test case is a mock prompt dispatched through the pipeline, with expected r
   - Expected: PM responds with JSON only, tool_uses=0
   - Pass criteria: PM dispatch returns with 0 tool_uses in usage stats
 
+### Section 5.1: rocm-systems Alignment (Phase 1.5 + per-agent re-verify)
+
+- [ ] **W-A1**: Phase 1.5 detects TheRock workspace
+  - Prompt (paper trace): SKILL.md Phase 1.5 Step 1.5.1 against a workspace containing `rocm-systems/.git`
+  - Expected: `<is_therock_workspace>` = true; pre-flight runs Step 1.5.2
+  - Pass criteria: state-transition table shows correct branch on detection
+
+- [ ] **W-A2**: Phase 1.5 — TRIGGER_DID_NOT_FIRE path
+  - Prompt (paper trace): rocm-systems on `develop`, TheRock on `main`
+  - Expected: `<alignment_status>` = TRIGGER_DID_NOT_FIRE, proceed to Parsing PM Output
+  - Pass criteria: no halt, no checkout, status.md records TRIGGER_DID_NOT_FIRE
+
+- [ ] **W-A3**: Phase 1.5 — ATTACHED_AND_PROCEEDED path
+  - Prompt (paper trace): rocm-systems detached at SHA = origin/develop tip; TheRock on `main`
+  - Expected: session runs `git -C <workspace>/rocm-systems checkout develop`, `<alignment_status>` = ATTACHED_AND_PROCEEDED
+  - Pass criteria: status.md records ATTACHED_AND_PROCEEDED, workflow proceeds
+
+- [ ] **W-A4**: Phase 1.5 — DIVERGENCE_HALTED path
+  - Prompt (paper trace): rocm-systems detached at pinned SHA, develop tip is 5 commits ahead; TheRock on `main`
+  - Expected: divergence report presented to user, NO agent dispatched, workflow halts
+  - Pass criteria: report includes (a)/(b)/(c) options, status.md records DIVERGENCE_HALTED
+
+- [ ] **W-A5**: Phase 1.5 — release branch maps to release/therock-X.Y NOT develop
+  - Prompt (paper trace): TheRock on `release/therock-7.0`
+  - Expected: `<mapped_branch>` = `release/therock-7.0` (NOT `develop`)
+  - Pass criteria: mapping table lookup produces release/therock-7.0; build/test/commit operate on the correct release line
+
+- [ ] **W-A6**: Phase 1.5 — FORK_BRANCH_AMBIGUOUS path
+  - Prompt (paper trace): TheRock on `users/<user>/topic-branch`
+  - Expected: `<alignment_status>` = FORK_BRANCH_AMBIGUOUS, user prompted to choose mapping, NO agent dispatched
+  - Pass criteria: candidate mapped branches listed; workflow halts
+
+- [ ] **W-A7**: Phase 1.5 — READ_ONLY_PINNED enforcement
+  - Prompt (paper trace): user chose option (b) at divergence prompt; later commit attempts to stage `rocm-systems/clr/foo.cpp`
+  - Expected: post-commit pre-step blocks the commit with COMMIT BLOCKED message
+  - Pass criteria: git-agent NOT dispatched; user surfaced (a)/(b) recovery options
+
+- [ ] **W-A8**: build-expert re-verifies even when dispatch context says ATTACHED
+  - Prompt (agent dispatch): build-expert dispatched with `ROCM-SYSTEMS ALIGNMENT CONTEXT` block claiming ATTACHED_AND_PROCEEDED, but actual rocm-systems state has drifted to detached at a different SHA since pre-flight
+  - Expected: build-expert runs verification commands itself, observes drift, reports the new verdict, flags discrepancy with the dispatch context
+  - Pass criteria: output's `ALIGNMENT_CHECK:` reflects re-verify result, not the stale context
+
+- [ ] **W-A9**: git-agent re-verifies even when dispatch context says aligned
+  - Prompt (agent dispatch): git-agent dispatched to commit; dispatch context claims TRIGGER_DID_NOT_FIRE; actual state has drifted to detached
+  - Expected: git-agent runs verification, refuses commit, surfaces alignment check
+  - Pass criteria: NO commit made; output's `ALIGNMENT_CHECK:` reflects observed state
+
+- [ ] **W-A10**: Output validator catches missing ALIGNMENT_CHECK line
+  - Prompt (paper trace): build-expert returns output starting with `BUILD_DECISION: BUILT` and no `ALIGNMENT_CHECK:` line
+  - Expected: session detects missing line, re-dispatches with correction note (retry 1 of 2)
+  - Pass criteria: validator state-transition produces re-dispatch, not silent acceptance
+
+- [ ] **W-A11**: Output validator catches forbidden combo (DIVERGENCE_HALTED + BUILD_DECISION)
+  - Prompt (paper trace): build-expert returns `ALIGNMENT_CHECK: DIVERGENCE_HALTED` followed by `BUILD_DECISION: BUILT`
+  - Expected: session detects forbidden combo, re-dispatches with correction note
+  - Pass criteria: workflow does not advance to PM with this output
+
+- [ ] **W-A12**: Output validator halts after 3 misses
+  - Prompt (paper trace): agent fails validation 3 times in a row
+  - Expected: session halts workflow, surfaces violation to user
+  - Pass criteria: retry_count cap = 2 enforced; user receives "definitional bug" message
+
+- [ ] **W-A13**: troubleshooter records SHA in investigation context
+  - Prompt (agent dispatch): troubleshooter investigates a bug in `rocm-systems/projects/clr/`
+  - Expected: output includes `## rocm-systems Investigation Context` section with SHA, ref state, TheRock branch, mapped branch
+  - Pass criteria: section present even when no divergence; investigation reproducibility preserved
+
+- [ ] **W-A14**: implementer surfaces plan-vs-release conflict
+  - Prompt (agent dispatch): implementer dispatched with plan that uses develop-only API; workspace on `release/therock-7.0`
+  - Expected: implementer halts editing, outputs PLAN-VS-RELEASE CONFLICT block
+  - Pass criteria: NO files written; PM re-routing requested
+
+- [ ] **W-A15**: tester records SHA context in test report
+  - Prompt (agent dispatch): tester runs HIP unit tests against rocm-systems
+  - Expected: output's `### rocm-systems SHA Context` section populated with SHA, ref state, TheRock+mapped branch, verdict
+  - Pass criteria: section present; test result is comparable to other runs at the same SHA
+
+- [ ] **W-A16**: bash-expert release example in 7-step template
+  - Prompt (paper trace): bash-expert specs a script for a `release/therock-7.0` workspace
+  - Expected: spec's step-4 mapping resolves to `release/therock-7.0` not `develop`; outside-pipeline note included
+  - Pass criteria: script's alignment check defaults are release-aware; user-runnable script does not silently corrupt release work
+
 ---
 
 ## Test Execution Priority

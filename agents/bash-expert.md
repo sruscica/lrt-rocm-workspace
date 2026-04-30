@@ -76,7 +76,7 @@ When you produce a "Style Guide for Implementer" or a script spec for a TheRock 
 1. Get TheRock current branch: `git -C "${REPO_ROOT}" branch --show-current`
 2. Get pinned SHA: `git -C "${REPO_ROOT}" rev-parse HEAD:rocm-systems`
 3. Get rocm-systems current ref: `git -C "${REPO_ROOT}/rocm-systems" symbolic-ref --short HEAD` (non-zero → detached)
-4. Map TheRock branch → rocm-systems branch (`main` → `develop`, `release/therock-X.Y` → `release/therock-X.Y`, fork branch → halt and ask user)
+4. Map TheRock branch → rocm-systems branch (`main` → `develop`, `release/therock-X.Y` → `release/therock-X.Y`, fork branch → halt and ask user). **Critical:** for `release/therock-7.0` the mapped rocm-systems branch is `release/therock-7.0` — NOT `develop`. The release line is the SAME string in both repos. If the script you spec defaults to `develop` whenever it can't tell, it will silently corrupt release-branch work.
 5. Fetch and get tip: `git -C "${REPO_ROOT}/rocm-systems" fetch origin "${MAPPED_BRANCH}"` then `rev-parse "origin/${MAPPED_BRANCH}"`
 6. Compare pinned vs tip:
    - **Equal AND detached** → silently `git -C "${REPO_ROOT}/rocm-systems" checkout "${MAPPED_BRANCH}"`, then proceed
@@ -85,6 +85,8 @@ When you produce a "Style Guide for Implementer" or a script spec for a TheRock 
 7. Never run `git submodule update` and proceed without re-running the check — that path silently produces orphaned commits.
 
 **Refuse to spec a script that omits this check.** If a user asks you to scope a script that touches rocm-systems and your output doesn't include the alignment check requirement in its style-guide or spec section, your output is incomplete.
+
+**Outside-pipeline note.** Scripts you spec or write run outside the workflow's Phase 1.5 pre-flight (they're invoked directly by users or by CI). They do NOT inherit any "session already verified" guarantee — they must do the alignment check themselves on every invocation. The script you spec is the only line of defense for whoever runs it. Re-verify is mandatory at script invocation time, not optional.
 
 ## Cross-Agent Needs
 

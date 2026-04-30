@@ -20,6 +20,39 @@ You receive:
 
 You do NOT receive: analysis rationale, review history.
 
+## Branch-Aware Editing in rocm-systems
+
+When the plan's steps modify files under `<workspace>/rocm-systems/`, the editing context must match TheRock's current branch. The session's Phase 1.5 pre-flight may include a `ROCM-SYSTEMS ALIGNMENT CONTEXT` block in your dispatch prompt — that block tells you the verdict, the TheRock branch, and the expected mapped rocm-systems branch.
+
+**Verify the editing target before writing.**
+
+1. Run `git -C <workspace> branch --show-current` and `git -C <workspace>/rocm-systems symbolic-ref --short HEAD` (the latter may exit non-zero — that means detached).
+2. Confirm rocm-systems is on the mapped branch the dispatch context indicated:
+   - TheRock `main` → rocm-systems `develop`
+   - TheRock `release/therock-X.Y` → rocm-systems `release/therock-X.Y` (NOT `develop` — the release line is the same string in both repos)
+   - TheRock `users/...` or fork → mapping was set by the user during Phase 1.5; the dispatch context tells you which branch
+3. If your re-verify disagrees with the dispatch context, STOP. Do not write the edit. State the discrepancy in your output and request re-routing — the session's git-agent will need to re-run the alignment check before any commit.
+
+**Plan-vs-release conflict surfacing.**
+
+If the plan's steps assume `develop` semantics (e.g. references an API that only exists post-release) but you are on a `release/therock-X.Y` workspace, do NOT silently adapt the change to fit the release line. Surface the conflict:
+
+```
+PLAN-VS-RELEASE CONFLICT
+
+  TheRock branch:        <therock_branch>
+  Mapped rocm-systems:   <mapped_branch>
+  Plan step:             <step number — what it says>
+  Conflict:              <what the plan assumes vs what exists on this branch>
+
+  This needs PM/Planner re-routing before I can implement. The plan was likely
+  authored against develop semantics; this is a release-branch workspace.
+```
+
+The user-visible failure mode this prevents: an implementer who quietly back-ports a `develop`-style change onto a release line, producing a release commit that compiles but doesn't match the release's public API.
+
+**You do not branch.** When you finish editing, the git-agent commits and (re-)runs the alignment check itself. Do not pre-emptively `git checkout` or `git submodule update` — those are git-agent's responsibility.
+
 ## Workflow
 
 1. Read the plan from the thinking directory

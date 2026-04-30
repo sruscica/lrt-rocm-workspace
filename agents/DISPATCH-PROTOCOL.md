@@ -289,6 +289,68 @@ State the need for a user decision and stop. Do not guess.
 - **Re-run the check after any TheRock branch switch** you perform. `git checkout <therock-branch>` does NOT move `rocm-systems` — divergence can appear instantly.
 - **Re-run the check after `git submodule update`** in TheRock. That command lands `rocm-systems` in detached HEAD at the (possibly new) pinned SHA.
 
+### Re-verify rule (defense in depth)
+
+The session runs an alignment pre-flight (Phase 1.5) before dispatching any agent that touches `rocm-systems`. **The pre-flight result is a hint, not a substitute.** Any agent that mutates state (build-expert running builds, git-agent committing/branching, bash-expert specifying scripts that touch the submodule) MUST re-run the verification commands itself before acting.
+
+Why: the pre-flight runs once at workflow start. State can drift between then and the agent's dispatch (a prior agent may have run `git submodule update`, switched a branch, or checked out a different ref). Trusting an upstream "already verified" claim and skipping re-verification is the failure mode that produced orphaned commits in earlier iterations of this pipeline. The alignment-context block included in your dispatch prompt tells you what the session believed at workflow start; your job is to confirm it's still true now.
+
+Read-only agents (troubleshooter, implementer in design-mode, tester) read the alignment-context block and surface awareness of the current alignment state in their outputs but do not need to re-run the commands themselves — they cannot commit and cannot trigger a build.
+
+### Worked example — release branch alignment
+
+TheRock workspace is on `release/therock-7.0`. The build-expert is dispatched to verify a HIP runtime change. Its alignment check:
+
+```
+git -C /workspace branch --show-current
+→ release/therock-7.0
+
+git -C /workspace rev-parse HEAD:rocm-systems
+→ a1b2c3d...
+
+git -C /workspace/rocm-systems symbolic-ref --short HEAD
+→ (exit 1, detached)
+
+# Mapped branch: release/therock-7.0 → release/therock-7.0
+# (NOT develop — develop is only mapped from main)
+
+git -C /workspace/rocm-systems fetch origin release/therock-7.0
+git -C /workspace/rocm-systems rev-parse origin/release/therock-7.0
+→ a1b2c3d...
+
+# Pinned SHA == tip SHA → ATTACHED_AND_PROCEEDED
+git -C /workspace/rocm-systems checkout release/therock-7.0
+# Then proceed with the build.
+```
+
+If TheRock is on `release/therock-7.0` and rocm-systems gets attached to `develop` by mistake, every subsequent commit lands on the wrong release line. The mapping table in the per-agent definitions exists to prevent exactly that.
+
+### Canonical ALIGNMENT_CHECK output schema
+
+Every agent that touches `rocm-systems` (build-expert, git-agent, bash-expert when specifying scripts, troubleshooter when investigating, implementer in mutation mode, tester when its results depend on the submodule SHA) MUST emit an `ALIGNMENT_CHECK:` line as the first parseable status line in its output. The session parses this line.
+
+Valid values:
+
+| Value | Meaning |
+|-------|---------|
+| `NOT_APPLICABLE` | Operation does not touch `<workspace>/rocm-systems/` (a TheRock-only commit, a query, a bisect tick on TheRock super-project). |
+| `TRIGGER_DID_NOT_FIRE` | `rocm-systems` is on the mapped branch (in-flight state). Proceeded with the requested operation. |
+| `ATTACHED_AND_PROCEEDED` | `rocm-systems` was detached at a SHA equal to the mapped branch tip. Ran the attach-checkout, then proceeded. |
+| `DIVERGENCE_HALTED` | Pinned SHA ≠ mapped branch tip. Output the divergence report and stopped. **Forbidden:** any state-mutating `Operation:` line after this verdict. |
+| `FORK_BRANCH_AMBIGUOUS` | TheRock is on a fork/feature branch with no defined mapping. Listed candidate mapped branches, stopped. **Forbidden:** any state-mutating `Operation:` line after this verdict. |
+
+Skipping this line, or pairing `DIVERGENCE_HALTED`/`FORK_BRANCH_AMBIGUOUS` with a state-mutating `Operation:` (e.g. `Operation: commit`, `Operation: build`, `BUILD_DECISION: BUILD_NOW`), is malformed output.
+
+### Output validator behavior
+
+The session parses each agent's output for the `ALIGNMENT_CHECK:` line and the forbidden-combination rule above. On a malformed result:
+
+1. **First miss:** session re-dispatches the agent with the original prompt plus a correction note: "Your previous output omitted the required `ALIGNMENT_CHECK:` line (or paired a halt verdict with a state-mutating Operation). Re-emit your output following the schema in DISPATCH-PROTOCOL.md."
+2. **Second miss:** same re-dispatch with stronger language.
+3. **Third miss:** session halts the workflow and surfaces the violation to the user. Do not silently swallow systematic violations — they indicate the agent definition or the prompt is broken.
+
+The retry cap is 2 (so the agent is invoked at most 3 times for the same step). This bound exists so a flaky output doesn't hide a real definitional bug.
+
 ## Thinking Directory Structure
 
 ```

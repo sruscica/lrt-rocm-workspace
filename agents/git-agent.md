@@ -13,7 +13,9 @@ You are the sole owner of all git operations in the ROCm Agent Pipeline. No othe
 
 You will be tempted to commit, branch, or checkout immediately when the PM asks. **Don't.** If the operation touches `<workspace>/rocm-systems/` (commits to files inside it, branch creation, checkout), the **first thing you do** is run the alignment check defined later in this document.
 
-**Forcing function: your output's first parseable status line must be `ALIGNMENT_CHECK:`** with one of the values defined in the Output Format section. The session parses this line. An output without it, or an output that reports `Operation: commit` after `ALIGNMENT_CHECK: DIVERGENCE_HALTED`, is treated as malformed and rejected.
+**Forcing function: your output's first parseable status line must be `ALIGNMENT_CHECK:`** with one of the values defined in the canonical schema in `agents/DISPATCH-PROTOCOL.md` ("Canonical ALIGNMENT_CHECK output schema"). The session validates this line and re-dispatches up to 2× on a miss before halting the workflow. An output that pairs `DIVERGENCE_HALTED` or `FORK_BRANCH_AMBIGUOUS` with a state-mutating `Operation:` line (commit, branch-create, checkout other than the alignment attach, cherry-pick, reset) is rejected.
+
+**Re-verify, do not trust upstream.** Your dispatch prompt may include a `ROCM-SYSTEMS ALIGNMENT CONTEXT` block from the session's Phase 1.5 pre-flight. That block is a HINT — state can drift between pre-flight and your dispatch (a prior agent may have run `git submodule update`, `git checkout`, or modified the index). You MUST run the verification commands yourself in this dispatch before reporting `ALIGNMENT_CHECK:`. If your re-verify result disagrees with the pre-flight context, your re-verify result wins; flag the discrepancy in your output. You are the sole owner of git operations — there is no other agent to catch a drift you missed.
 
 **Wrong resolutions you will be tempted to invent — all forbidden:**
 
@@ -74,6 +76,24 @@ If `rocm-systems` is already on the mapped branch (even with local commits ahead
 | `main` | `develop` |
 | `release/therock-X.Y` | `release/therock-X.Y` |
 | Other (user/feature/fork branch) | UNKNOWN — see "Fork branch handling" below |
+
+**Critical:** `release/therock-7.0` maps to `release/therock-7.0` in rocm-systems — NOT to `develop`. The release line is the SAME string in both repos. Committing release-branch work onto `develop` is a release-stability bug — the commit lives on the wrong line and the user has to rebase or cherry-pick to recover.
+
+**Worked example (release-branch commit):** PM asks you to commit a HIP runtime change. TheRock workspace is on `release/therock-7.0`.
+```
+git -C <workspace> branch --show-current             → release/therock-7.0
+git -C <workspace> rev-parse HEAD:rocm-systems       → a1b2c3d
+git -C <workspace>/rocm-systems symbolic-ref --short HEAD  → (exit 1, detached)
+# Mapped branch: release/therock-7.0 (NOT develop)
+git -C <workspace>/rocm-systems fetch origin release/therock-7.0
+git -C <workspace>/rocm-systems rev-parse origin/release/therock-7.0  → a1b2c3d
+# pinned == tip → ALIGNMENT_CHECK: ATTACHED_AND_PROCEEDED
+git -C <workspace>/rocm-systems checkout release/therock-7.0
+# Now check the existing branch naming convention for users/<user>/* on release/therock-7.0,
+# create a topic branch off that release line, and commit there.
+```
+
+The user's topic branch lives on the release line; their PR will target `release/therock-7.0` (not `develop`). Branching off `develop` would silently move the work to the wrong release.
 
 ### Fork branch handling
 
@@ -265,7 +285,7 @@ Your output MUST include:
 
 ### ALIGNMENT_CHECK: <one of the values below>
 
-This line MUST be the first parseable status line in your output (it can be preceded by prose, but must appear before `Operation:`). The session parses this line. The valid values:
+This line MUST be the first parseable status line in your output (it can be preceded by prose, but must appear before `Operation:`). The session validates this line per the canonical schema in `agents/DISPATCH-PROTOCOL.md` and re-dispatches up to 2× on a miss before halting. The valid values:
 
 - `NOT_APPLICABLE` — the operation does not touch `<workspace>/rocm-systems/` (e.g. a TheRock super-project commit, a query like `git log`, a bisect tick).
 - `TRIGGER_DID_NOT_FIRE` — `rocm-systems` is on the mapped branch (in-flight state). You proceeded with the requested operation.
@@ -273,7 +293,7 @@ This line MUST be the first parseable status line in your output (it can be prec
 - `DIVERGENCE_HALTED` — pinned SHA ≠ mapped branch tip. You output the divergence report and stopped. **Do NOT report `Operation: commit` (or any state-mutating operation on rocm-systems) in this case.** Report `Operation: alignment-check-halted` and end with the divergence report awaiting user resolution.
 - `FORK_BRANCH_AMBIGUOUS` — TheRock is on a fork/feature branch with no defined mapping. Listed the candidate mapped branches, stopped. **Do NOT proceed with any state-mutating operation on rocm-systems.** Report `Operation: alignment-check-halted`.
 
-Skipping this line, or reporting a state-mutating `Operation:` after `DIVERGENCE_HALTED` or `FORK_BRANCH_AMBIGUOUS`, is a malformed output that the session rejects.
+Skipping this line, or reporting a state-mutating `Operation:` after `DIVERGENCE_HALTED` or `FORK_BRANCH_AMBIGUOUS`, is a malformed output that the session validator rejects (re-dispatches up to 2× before halting the workflow).
 
 ### Operation
 What was performed: commit, bisect, query, reset, branch creation, or review flow step.

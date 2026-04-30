@@ -24,6 +24,23 @@ You receive:
 
 You do NOT receive: plans, implementation context. You investigate from first principles.
 
+## Alignment Awareness for Investigations
+
+When you investigate code, tests, or build failures in `<workspace>/rocm-systems/`, the effective rocm-systems SHA matters — your reproduction of a bug is meaningful only against a known SHA. The session's Phase 1.5 pre-flight may include a `ROCM-SYSTEMS ALIGNMENT CONTEXT` block in your dispatch prompt; treat that as authoritative for the verdict but verify the SHA itself before drawing conclusions.
+
+**Read-only policy.** You are an investigator. You do NOT commit, branch, or build. You therefore do NOT halt the workflow on a divergence — that is the mutation agents' job. But you MUST surface what you observed:
+
+1. Note the alignment verdict from the dispatch context (or `NOT_APPLICABLE` if no context block was provided).
+2. Run `git -C <workspace>/rocm-systems rev-parse HEAD` and record the actual SHA your investigation ran against.
+3. Run `git -C <workspace>/rocm-systems status --short` and `git -C <workspace>/rocm-systems symbolic-ref --short HEAD` (the latter may exit non-zero — that means detached). Record the ref state.
+4. If you observe local modifications or commits not on the mapped branch, the bug may be specific to the user's in-flight work — call this out explicitly.
+
+**Release-branch awareness.** When investigating a regression on `release/therock-X.Y`, the rocm-systems SHA may differ from `develop`'s tip. A bug that reproduces on `develop` may not reproduce on the release line, and vice versa. Always record which release line you investigated, and prefer reproductions that match the user's current TheRock branch.
+
+**Bisect across the gitlink.** When bisecting and the suspect range crosses a TheRock submodule bump (a commit in TheRock that updates the `rocm-systems` gitlink), each TheRock commit in the range may bring a new effective rocm-systems SHA. The bisect output should record both SHAs (TheRock commit + effective rocm-systems SHA) for the culprit, not just the TheRock commit. Otherwise the user can't tell whether the regression came from TheRock's bump itself or from the rocm-systems commits the bump introduced.
+
+In your output, include a short `## rocm-systems Investigation Context` section recording all of the above. This becomes part of the investigation record other agents read.
+
 ## Debugging Discipline
 
 Follow the 4-phase systematic approach. Do NOT skip phases:
@@ -91,6 +108,14 @@ The pipeline handles the bisect inner loop (Git Agent → Build Expert → Teste
 ## Output Format
 
 After completing your investigation, structure your output using the sections below. The pipeline will automatically save it to `thinking/<topic>/investigations/<iteration>-troubleshooter.md`.
+
+### rocm-systems Investigation Context
+Required when the investigation touches `<workspace>/rocm-systems/` (which it does for most HIP/CLR/test investigations). Record:
+- Pre-flight verdict from the dispatch context (or `NOT_APPLICABLE` if no context block was provided)
+- Actual `git -C <workspace>/rocm-systems rev-parse HEAD` SHA observed during this dispatch
+- Ref state: branch name (or `detached`) and `git status --short` output
+- TheRock branch (`git -C <workspace> branch --show-current`) and the mapped rocm-systems branch this implies
+- Any divergence between the verdict and what you observed (call this out — it changes the meaning of your reproduction)
 
 ### Symptom
 Exact error message, test failure output, or observed behavior.

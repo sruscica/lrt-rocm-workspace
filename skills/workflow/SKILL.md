@@ -249,6 +249,154 @@ pipeline_start_commit = git -C <workspace> rev-parse HEAD
 ```
 Store this value for use in Phase 3 (review scope selection).
 
+### Phase 1.5: rocm-systems Alignment Pre-Flight
+
+**Why this phase exists.** TheRock pins `rocm-systems` via gitlink (a specific SHA). After `git submodule update`, `rocm-systems` lands in detached HEAD. Any commit an agent makes in detached HEAD is silently abandoned the next time the submodule moves. Switching TheRock branches does NOT move `rocm-systems`, so the workspace can build against a different effective SHA than the user thinks. Phase 1.5 catches both failure modes before any agent runs.
+
+This pre-flight is structural (session-enforced), not advisory. The PM does NOT decide whether to run it. The session runs it on every workflow invocation in a TheRock workspace.
+
+**Step 1.5.1: Detect TheRock workspace**
+
+```
+IF <workspace>/rocm-systems/.git exists OR <workspace>/.gitmodules contains "rocm-systems":
+  Set <is_therock_workspace> = true
+ELSE:
+  Set <is_therock_workspace> = false
+  Set <alignment_status> = NOT_APPLICABLE
+  Skip to Parsing PM Output.
+```
+
+**Step 1.5.2: Run alignment check (TheRock workspace only)**
+
+Run these commands one at a time. Do NOT capture into shell variables — the command rules forbid `$VAR` expansion.
+
+```
+1. git -C <workspace> branch --show-current
+   → <therock_branch>
+
+2. git -C <workspace> rev-parse HEAD:rocm-systems
+   → <pinned_sha>
+
+3. git -C <workspace>/rocm-systems symbolic-ref --short HEAD
+   → <rocm_systems_branch> (or non-zero exit if detached)
+
+4. Determine <mapped_branch> from the table:
+   | TheRock branch         | Mapped rocm-systems branch |
+   |------------------------|---------------------------|
+   | main                   | develop                    |
+   | release/therock-X.Y    | release/therock-X.Y        |
+   | (anything else)        | UNKNOWN — ASK USER         |
+
+   If <therock_branch> matches "release/therock-*", the mapped branch is the
+   SAME release/therock-* string in rocm-systems. Do NOT collapse to develop.
+
+5. IF <mapped_branch> is UNKNOWN:
+     Set <alignment_status> = FORK_BRANCH_AMBIGUOUS
+     Skip to Step 1.5.3.
+
+6. git -C <workspace>/rocm-systems fetch origin <mapped_branch>
+   git -C <workspace>/rocm-systems rev-parse origin/<mapped_branch>
+   → <tip_sha>
+
+7. Determine status by comparing pinned to tip and current ref:
+   - <rocm_systems_branch> == <mapped_branch>:
+       → <alignment_status> = TRIGGER_DID_NOT_FIRE (in-flight state)
+   - detached AND <pinned_sha> == <tip_sha>:
+       git -C <workspace>/rocm-systems checkout <mapped_branch>
+       → <alignment_status> = ATTACHED_AND_PROCEEDED
+   - detached AND <pinned_sha> != <tip_sha>:
+       → <alignment_status> = DIVERGENCE_HALTED
+   - on a branch != <mapped_branch>:
+       → <alignment_status> = DIVERGENCE_HALTED
+       (the user is on an unexpected branch — surface it, do not auto-attach)
+```
+
+**Step 1.5.3: Handle the result**
+
+| `<alignment_status>` | Session action |
+|----------------------|----------------|
+| `TRIGGER_DID_NOT_FIRE` | Proceed to Parsing PM Output. Record status in status.md. |
+| `ATTACHED_AND_PROCEEDED` | Proceed to Parsing PM Output. Record status in status.md. |
+| `DIVERGENCE_HALTED` | Build the divergence report (below) and present to user. Halt. Do NOT dispatch any agent. |
+| `FORK_BRANCH_AMBIGUOUS` | Ask the user which mapped branch the fork derives from. Halt. Do NOT dispatch any agent. |
+
+**Divergence report (when `DIVERGENCE_HALTED`):**
+
+Gather:
+```
+git -C <workspace>/rocm-systems rev-list --count <pinned_sha>..origin/<mapped_branch>
+git -C <workspace>/rocm-systems rev-list --count origin/<mapped_branch>..<pinned_sha>
+git -C <workspace>/rocm-systems log --oneline -10 <pinned_sha>..origin/<mapped_branch>
+```
+
+Present:
+```
+ROCM-SYSTEMS DIVERGENCE DETECTED
+
+  TheRock branch:        <therock_branch>
+  Expected rocm-systems: <mapped_branch>
+  Pinned SHA:            <pinned_sha>     ← what TheRock builds today
+  Branch tip SHA:        <tip_sha>
+  Commits ahead of pin:  <N>
+  Commits behind pin:    <M>
+
+  Recent commits on <mapped_branch> not yet pinned in TheRock:
+    <hash> <subject>
+    ...
+
+  Choose:
+    (a) Use rocm-systems <mapped_branch> tip (<tip_sha>) — likely has fixes not yet bumped into TheRock; agents may commit on this branch
+    (b) Use TheRock's pinned SHA (<pinned_sha>) — detached HEAD; READ-ONLY, no commits possible
+    (c) Cancel workflow
+```
+
+On user response (a): `git -C <workspace>/rocm-systems checkout <mapped_branch> && git -C <workspace>/rocm-systems reset --hard origin/<mapped_branch>`. Re-run Phase 1.5 from Step 1.5.2 to confirm. Update `<alignment_status>`.
+
+On user response (b): leave detached HEAD. Set `<alignment_status>` = `READ_ONLY_PINNED`. Mark the workflow as commit-restricted: any subsequent agent that attempts to commit in `rocm-systems` MUST be halted by the session (see Step 1.5.4).
+
+On user response (c): exit the workflow.
+
+**Step 1.5.4: Record alignment status in status.md**
+
+Dispatch note-taker to add (or update) the `Submodule Alignment Status` field:
+
+```
+Agent(subagent_type: "note-taker", prompt: """
+Update <thinking_dir>/status.md to set:
+  Submodule Alignment Status: <alignment_status>
+  Submodule TheRock Branch: <therock_branch>
+  Submodule Mapped Branch: <mapped_branch_or_NA>
+  Submodule Pinned SHA: <pinned_sha_or_NA>
+  Submodule Tip SHA: <tip_sha_or_NA>
+
+If these fields don't exist in status.md yet, add them in the Pipeline Metadata section.
+""")
+```
+
+This is the source of truth that downstream agents read. Per the re-verify rule (DISPATCH-PROTOCOL.md), it is a HINT — agents that mutate state MUST re-run the verification commands.
+
+**Step 1.5.5: Read-only pinned mode enforcement (when `<alignment_status>` = `READ_ONLY_PINNED`)**
+
+When the user chose option (b), the session enters commit-restricted mode for `rocm-systems`. Before dispatching git-agent for a commit, the session checks the files staged. If any path begins with `rocm-systems/`, the session halts with:
+
+```
+COMMIT BLOCKED — READ-ONLY PINNED SHA MODE
+
+You chose to operate at TheRock's pinned rocm-systems SHA (<pinned_sha>),
+which means rocm-systems is in detached HEAD and commits would be orphaned.
+
+The following staged paths cannot be committed:
+  <path1>
+  <path2>
+
+Choose:
+  (a) Discard the staged rocm-systems changes
+  (b) Restart the workflow and pick option (a) at the divergence prompt
+      (rocm-systems <mapped_branch> tip)
+```
+
+This enforcement runs in the Mandatory Post-Commit Sequence, BEFORE git-agent dispatch.
+
 ### Parsing PM Output — JSON Normalization
 
 The PM often returns non-compliant JSON. The session MUST normalize PM output before acting on it. Follow these steps every time you receive PM output:
@@ -498,6 +646,23 @@ Thinking directory: <thinking_dir>
 Iteration: <iteration>
 User request: <one-line task summary>
 
+<if <is_therock_workspace> is true, append the alignment-context block:>
+
+ROCM-SYSTEMS ALIGNMENT CONTEXT (from session pre-flight):
+  TheRock branch:        <therock_branch>
+  Mapped rocm-systems:   <mapped_branch>
+  Pinned SHA:            <pinned_sha>
+  Mapped tip SHA:        <tip_sha>
+  Pre-flight verdict:    <alignment_status>
+
+This context is a HINT. State can drift between pre-flight and your dispatch.
+- If you mutate state (commit, branch, build, write scripts that touch the submodule):
+  re-run the verification commands yourself before acting. Emit ALIGNMENT_CHECK:
+  in your output per DISPATCH-PROTOCOL.md.
+- If you only read (investigate, design, test): record the alignment verdict in
+  your output but you do not need to re-verify. Note any inconsistency you observe
+  between the verdict and what you see.
+
 <task-specific context from PM's context_notes>
 
 Read these files for context:
@@ -508,6 +673,54 @@ Results from <target_agent> are at: <results_file_path>
 Continue your work incorporating those results.
 """)
 ```
+
+### Alignment Output Validator
+
+After every dispatch of an agent that touches `rocm-systems` (build-expert, git-agent, bash-expert in mutation mode, troubleshooter, implementer, tester), the session validates the output BEFORE handing it to the PM.
+
+**Agents requiring validation:**
+
+| Agent | Required when |
+|-------|---------------|
+| build-expert | always (it builds against the submodule) |
+| git-agent | always (it commits/branches; for submodule-untouching ops it emits `NOT_APPLICABLE`) |
+| bash-expert | when its task involves a script that touches `rocm-systems/` |
+| troubleshooter | when investigating code or tests in `rocm-systems/` |
+| implementer | when its plan steps touch files under `rocm-systems/` |
+| tester | when the test result depends on the rocm-systems SHA (most HIP/CLR tests) |
+
+**Validation rules:**
+
+1. The agent's output MUST contain a line matching `^ALIGNMENT_CHECK: (NOT_APPLICABLE|TRIGGER_DID_NOT_FIRE|ATTACHED_AND_PROCEEDED|DIVERGENCE_HALTED|FORK_BRANCH_AMBIGUOUS)$` before any state-mutating `Operation:` line, `BUILD_DECISION:` line, or commit hash.
+2. If the verdict is `DIVERGENCE_HALTED` or `FORK_BRANCH_AMBIGUOUS`, the output MUST NOT contain any state-mutating line:
+   - `Operation: commit`, `Operation: branch-create`, `Operation: checkout` (other than the alignment-attach), `Operation: cherry-pick`, `Operation: reset`
+   - `BUILD_DECISION: BUILD_NOW` or `BUILD_DECISION: BUILD_REQUIRED` followed by build execution
+   - Any line of the form `Commit hash: <sha>` or `Branch created: <name>`
+
+**Re-dispatch loop on validation miss:**
+
+```
+retry_count = 0
+loop:
+  dispatch agent
+  validate output
+  IF valid: break, hand output to PM
+  IF retry_count < 2:
+    retry_count += 1
+    re-dispatch with this prepended note:
+      "Your previous output was malformed: <specific violation>.
+       Re-emit your output starting with the required ALIGNMENT_CHECK: line
+       and following the schema in DISPATCH-PROTOCOL.md. Do not include
+       state-mutating Operation: lines if your verdict is a halt verdict."
+  ELSE:
+    halt the workflow. Surface to user:
+      "Agent <name> produced malformed alignment output 3 times in a row.
+       This indicates a definitional bug in the agent or the prompt.
+       Last output: <truncated output>
+       Stopping the workflow. The issue requires manual investigation."
+```
+
+The retry cap is 2 (so the agent is invoked at most 3 times for the same step). Do NOT let validation misses cascade silently — they hide the failure mode this whole architecture exists to prevent.
 
 ### Ask PM What's Next
 
@@ -609,6 +822,8 @@ For `knowledge` tasks: skip this check (no build/test expected).
 
 After every `commit` action (for `design`, `bug`, or `script` tasks), the session MUST classify the committed files and follow the appropriate path.
 
+**Pre-step (read-only-pinned guard):** If `<alignment_status>` is `READ_ONLY_PINNED` and any staged path begins with `rocm-systems/`, halt with the COMMIT BLOCKED message defined in Phase 1.5 Step 1.5.5. Do NOT dispatch git-agent.
+
 ```
 POST-COMMIT:
   1. Classify committed files:
@@ -647,6 +862,10 @@ POST-COMMIT:
          report BUILD_DECISION: DEFERRED and skip building. If ANY changes are functional,
          build incrementally and report BUILD_DECISION: BUILT.
          Component: <component>. Target: <target>. Workspace: <workspace>."
+        - Apply the dispatch template, which includes the alignment-context block
+          when <is_therock_workspace> is true.
+        - Run the Alignment Output Validator on build-expert's output. If validation
+          fails, re-dispatch up to 2× per the validator's retry loop.
         - Handle output saving (Note-taker for build-expert)
 
      c. Parse build-expert output for BUILD_DECISION and update Build Status:
