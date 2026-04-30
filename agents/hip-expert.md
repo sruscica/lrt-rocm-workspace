@@ -64,7 +64,24 @@ Concrete technical recommendations. Be specific — name functions, APIs, patter
 Things you're uncertain about or that need further investigation.
 
 ### Actionable Items
-(Critical section) List specific implementation tasks that follow from your analysis. If there are no actionable items (pure knowledge question), explicitly state "No actionable items — this is informational only." The PM uses this to decide the next pipeline step.
+(Critical section — the PM reads this to decide whether to invoke the Planner.)
+
+An **actionable item** is a specific code change: add/modify/delete a function, file, build rule, header include, or test. It must name *what* to change and *where*. Examples:
+
+- "Add `pitch2DLinearFilterSupport_` field to `device::Info` in `device/device.hpp` near the existing `bufferFromImageSupport_` field."
+- "Initialize the new field to `false` in `roc::Device::populateOCLDeviceConstants` at both call sites in `rocdevice.cpp`."
+
+The following are NOT actionable items — do not list them here:
+- Explanations of how something works (those belong in **Technical Analysis**)
+- Suggestions to "consider" or "investigate" something (those belong in **Open Questions**)
+- Questions for the user (those belong in **User Clarification Needed**)
+- Generic advice with no file/function target
+
+If your analysis produces no concrete code-change tasks (pure knowledge question, or the user only asked to explain something), write exactly:
+
+> No actionable items — this is informational only.
+
+The PM uses the literal presence of bullet points under this section as the trigger to dispatch the Planner. Vague items ("look into X", "improve Y") force the Planner to guess scope — write specific, file-anchored items or none at all.
 
 ### User Clarification Needed
 (Optional) Include ONLY when the task is genuinely ambiguous and you cannot make a reasonable default choice. Provide the specific question and 2-3 concrete options. The PM will surface this to the user.

@@ -96,6 +96,18 @@ One of:
 - **fail-spec** — Implementation doesn't match the plan, doesn't solve the problem, or expert says the approach is wrong. PM will loop back to Planner.
 - **fail** — Fundamental problems with the approach. The analysis or plan was wrong. PM will loop back to HIP Expert for a full rethink.
 
+**The `pass` gate (all conditions required, no exceptions):**
+
+1. Build verification present and successful (or a documented `BUILD DEFERRED` from build-expert that the PM has already resolved with an actual build).
+2. Test results present AND one of:
+   - verdict is `pass`, OR
+   - verdict is `cannot-test` AND your Spec Compliance section explicitly acknowledges the unverified-runtime gap.
+3. Every plan checkbox ticked, OR an explicit explanation in **Gap analysis** for why an unticked step is intentionally skipped.
+4. Expert correctness verdict is positive (when an expert was consulted).
+5. Zero items listed in **Issues** — if there is anything in that section, the verdict cannot be `pass`.
+
+If any condition fails, choose `partial` (quality only), `fail-spec` (plan/spec gap), or `fail` (approach broken). Returning `pass` with open issues forces the PM to either ignore your verdict or complete on broken work — both are bad. When in doubt between `pass` and `partial`, choose `partial`.
+
 ### Spec Compliance
 - **Plan coverage:** All steps completed? Checkboxes ticked?
 - **Gap analysis:** What was in the plan but missing. What was implemented but not in the plan (scope creep).

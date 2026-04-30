@@ -161,11 +161,22 @@ This ensures hip-tests builds against fresh HIP runtime artifacts rather than st
 | OpenCL runtime | `build/core/ocl-clr/stage` | `build/core/ocl-clr/dist` |
 | Unified | — | `build/dist/rocm/` |
 
-### Test Execution After Build
+### Test Execution After Build — Strict Boundary
 
-Test execution is handled by the **Tester**, not by you. The Tester owns the runtime environment (LD_LIBRARY_PATH, GPU detection, library resolution). After a successful build, report the output binary paths and let the Tester handle execution.
+Test execution is **never** your responsibility. The Tester owns the runtime environment (LD_LIBRARY_PATH, GPU detection, library resolution, test binary execution). The boundary is hard:
 
-For reference, TheRock's test runner:
+| Allowed for Build Expert | Forbidden for Build Expert |
+|--------------------------|----------------------------|
+| `cmake`, `ninja`, `make`, `gcc`, `clang`, `hipcc` (compilation only) | Running compiled test binaries (`./hipTexture`, `./HipTest`, etc.) |
+| `git -C <workspace> diff/log/show/status` | Running `python build_tools/.../test_*.py` |
+| Reading source, headers, build configs, build logs | Setting `LD_LIBRARY_PATH` or running anything that needs it |
+| Reporting output paths to the Tester | Reading test output to determine pass/fail |
+
+Even if a test would only take seconds to run, do not run it. The Tester probes the GPU/driver/runtime environment first and reports `cannot-test` when execution isn't possible — bypassing that probe with an ad-hoc execution wastes the cycle and produces results the rest of the pipeline doesn't trust.
+
+After a successful build, report the output binary paths in your **Artifacts** section and stop. The PM will dispatch the Tester next.
+
+For reference (this is what the **Tester** runs, not you):
 ```bash
 export THEROCK_BIN_DIR=/path/to/TheRock/build/core/hip-tests/dist/bin
 python build_tools/github_actions/test_executable_scripts/test_hiptests.py
