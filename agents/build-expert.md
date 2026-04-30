@@ -21,22 +21,70 @@ You may be invoked by:
 
 You receive: what needs to be built, which components changed, workspace path.
 
-## rocm-systems Alignment — Run Before Building
+## rocm-systems Alignment — Run Before Building (MANDATORY)
 
-If the workspace contains a `rocm-systems` submodule, your **first action** in any dispatch (before diff analysis, before configure, before build) is the alignment check defined in `DISPATCH-PROTOCOL.md` under "rocm-systems Submodule — Branch Attachment & Divergence Check". This prevents two silent failures:
+If the workspace contains a `rocm-systems` submodule, your **first action** in any dispatch (before diff analysis, before configure, before build) is this alignment check. **You must run it.** "Detached HEAD is normal for submodules" is a general fact that does **not** apply in this pipeline — for our purposes detached HEAD is a hard trigger, because downstream agents will commit and any commit in detached HEAD is a silent data-loss bug.
 
-- Building against a `rocm-systems` SHA that differs from what the user thinks (silent divergence after a TheRock branch switch).
-- Letting a downstream commit land in detached HEAD and get orphaned.
+### Trigger condition
 
-The procedure is fully specified in the protocol. The outcomes for your dispatch:
+Run the check when **either** is true:
+- `rocm-systems` is in detached HEAD, OR
+- `rocm-systems` is on a branch ≠ the mapped branch.
 
-- **Trigger does not fire** (rocm-systems already on the mapped branch) → proceed normally to diff analysis or build.
-- **Trigger fires, pinned SHA == mapped branch tip** → run the `git -C <workspace>/rocm-systems checkout <mapped-branch>` step from the procedure, then proceed.
-- **Trigger fires, pinned SHA ≠ mapped branch tip** → STOP. Output the divergence report exactly as specified in the protocol. Do **not** build. Do **not** report `BUILD_DECISION` — your dispatch is blocked pending the user's choice between the branch tip and the pinned SHA. State the need for the user decision in your output.
+If `rocm-systems` is already on the mapped branch (even with local commits ahead of TheRock's pinned SHA), the trigger does **not** fire — proceed normally. That is the in-flight development state.
 
-If you perform any TheRock branch switch during the dispatch (rare, but possible during diagnosis), **re-run the alignment check** before continuing. A TheRock checkout does not move `rocm-systems`.
+### Branch mapping
 
-When the alignment check resolves a divergence (user chose the branch tip, or a re-pin landed), the effective `rocm-systems` SHA may have changed since the last build artifact. Treat the next build as if upstream dependencies changed — be willing to rebuild downstream components that depend on `rocm-systems` content.
+| TheRock branch | Mapped rocm-systems branch |
+|----------------|---------------------------|
+| `main` | `develop` |
+| `release/therock-X.Y` | `release/therock-X.Y` |
+| Other (user/feature/fork) | UNKNOWN — ask the user once which family the work derives from |
+
+### Procedure (run commands one at a time; synthesize comparisons in reasoning, not in shell)
+
+1. `git -C <workspace> branch --show-current` → TheRock current branch.
+2. `git -C <workspace> rev-parse HEAD:rocm-systems` → pinned SHA via gitlink.
+3. `git -C <workspace>/rocm-systems symbolic-ref --short HEAD` → branch name, or non-zero exit if detached.
+4. Determine the mapped branch from the table.
+5. `git -C <workspace>/rocm-systems fetch origin <mapped-branch>` then `git -C <workspace>/rocm-systems rev-parse origin/<mapped-branch>` → mapped branch tip SHA.
+6. Compare pinned (step 2) vs tip (step 5):
+   - **Equal** → `git -C <workspace>/rocm-systems checkout <mapped-branch>`. Then proceed with the build.
+   - **Different** → STOP. Output the divergence report (below). Do **not** build. Do **not** report `BUILD_DECISION`. State the need for a user decision: (a) attach to `<mapped-branch>` tip, or (b) acknowledge read-only at the pinned SHA.
+
+### Divergence report format (when pinned ≠ tip)
+
+```
+ROCM-SYSTEMS DIVERGENCE DETECTED
+
+  TheRock branch:        <therock-branch>
+  Expected rocm-systems: <mapped-branch>
+  Pinned SHA:            <pinned-sha>     ← what TheRock builds today
+  Branch tip SHA:        <tip-sha>
+  Commits ahead of pin:  <N>
+  Commits behind pin:    <M>
+
+  Recent commits on <mapped-branch> not yet pinned in TheRock:
+    <hash> <subject>
+    ...
+
+  Choose:
+    (a) Use rocm-systems <mapped-branch> tip (<tip-sha>) — likely has fixes not yet bumped into TheRock; agents may commit on this branch
+    (b) Use TheRock's pinned SHA (<pinned-sha>) — detached HEAD; READ-ONLY, no commits possible
+```
+
+### Common wrong reasoning to avoid
+
+- ❌ **"Detached HEAD is normal for submodules — no action needed."** Generally true outside this pipeline; here it is the trigger. Run the check.
+- ❌ **"TheRock intentionally pins submodules; building against the pinned SHA is correct as-is."** That logic is fine for a static build, but the pipeline's downstream agents will try to commit to `rocm-systems`. Detached + commit = orphan. Always attach when aligned, halt when divergent.
+- ❌ **"The pin only matters at `fetch_sources.py` time; whatever is in the worktree is what compiles."** The pin matters now because the gate exists to keep the worktree on a real branch so downstream agents can commit safely.
+- ❌ **"The 3 commits ahead are informational; user didn't ask for a bump."** Divergence between pin and branch tip means the user must consciously choose which one this dispatch operates against. Surface the divergence; do not pick for them.
+
+### After resolution
+
+When the user resolves a divergence, the effective `rocm-systems` SHA may have changed. Treat the next build as if upstream dependencies changed — be willing to rebuild downstream components.
+
+If you perform any TheRock branch switch during the dispatch (rare, but possible during diagnosis), **re-run the alignment check** before continuing.
 
 ## Diff Analysis Mode (Post-Commit)
 

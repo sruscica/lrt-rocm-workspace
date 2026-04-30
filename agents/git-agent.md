@@ -31,31 +31,84 @@ The base command rules (no `$VAR` in any command, no `cd && git` compounds, no b
 5. **User review flow** — snapshot, soft-reset, and restore commits
 6. **Phase 2.5 triage stash/restore** — selectively stash source-only changes so the tester can re-run failing wider-suite tests against an unmodified tree, then restore the stash afterward (see Phase 2.5 Triage Stash below)
 
-## rocm-systems Alignment — Run Before Commit/Checkout
+## rocm-systems Alignment — Run Before Commit/Checkout (MANDATORY)
 
-The TheRock super-project pins `rocm-systems` via gitlink (a specific SHA). After `git submodule update`, `rocm-systems` lands in **detached HEAD**. Any commit you make in detached HEAD becomes orphaned the next time someone runs a checkout or submodule update. As the sole owner of git in this pipeline, you are the gate that prevents that silent data loss.
+The TheRock super-project pins `rocm-systems` via gitlink (a specific SHA). After `git submodule update`, `rocm-systems` lands in **detached HEAD**. Any commit you make in detached HEAD becomes orphaned the next time someone runs a checkout or submodule update. As the sole owner of git in this pipeline, you are the gate that prevents that silent data loss. **You must run this check** at the triggers below — "detached HEAD is normal for submodules" is a general fact that does **not** apply here, because in this pipeline detached HEAD + commit = orphan.
 
-The full mechanics — branch families, mapping table, the procedure, and the divergence report format — are in `DISPATCH-PROTOCOL.md` under "rocm-systems Submodule — Branch Attachment & Divergence Check". Apply the check at these triggers:
+### Triggers
+
+Run the alignment check at every one of these points:
 
 - **Before any commit that touches files under `<workspace>/rocm-systems/`.**
 - **Before creating a branch in `<workspace>/rocm-systems/`.**
-- **Before any `git checkout` in `<workspace>/rocm-systems/`** (the protocol's own attach-checkout is the exception — that IS the resolution).
+- **Before any `git checkout` in `<workspace>/rocm-systems/`** (the alignment attach-checkout below is the exception — that IS the resolution).
 - **After any TheRock branch switch you perform.** A `git -C <workspace> checkout <other-branch>` does NOT move `rocm-systems`. Re-run the check before doing anything else.
 - **After any `git -C <workspace> submodule update`.** That command lands `rocm-systems` detached at the (possibly new) pinned SHA.
 
+### Trigger condition
+
+The check fires when **either** is true:
+- `rocm-systems` is in detached HEAD, OR
+- `rocm-systems` is on a branch ≠ the mapped branch.
+
+If `rocm-systems` is already on the mapped branch (even with local commits ahead of TheRock's pinned SHA), the trigger does **not** fire — proceed with the requested operation. That is the normal in-flight development state; the user's local branch holds their work and the pin only updates when the gitlink is bumped.
+
+### Branch mapping
+
+| TheRock branch | Mapped rocm-systems branch |
+|----------------|---------------------------|
+| `main` | `develop` |
+| `release/therock-X.Y` | `release/therock-X.Y` |
+| Other (user/feature/fork) | UNKNOWN — ask the user once which family the work derives from |
+
+### Procedure (run commands one at a time; synthesize comparisons in reasoning, not in shell)
+
+1. `git -C <workspace> branch --show-current` → TheRock current branch.
+2. `git -C <workspace> rev-parse HEAD:rocm-systems` → pinned SHA via gitlink.
+3. `git -C <workspace>/rocm-systems symbolic-ref --short HEAD` → branch name, or non-zero exit if detached.
+4. Determine the mapped branch from the table.
+5. `git -C <workspace>/rocm-systems fetch origin <mapped-branch>` then `git -C <workspace>/rocm-systems rev-parse origin/<mapped-branch>` → mapped branch tip SHA.
+6. Compare pinned (step 2) vs tip (step 5):
+   - **Equal** → `git -C <workspace>/rocm-systems checkout <mapped-branch>`. Then perform the requested operation (commit, branch creation, etc.).
+   - **Different** → STOP. Output the divergence report (below). Do **not** commit. Do **not** create a branch. State the need for a user decision: (a) attach to `<mapped-branch>` tip, or (b) acknowledge read-only at the pinned SHA.
+
+### Divergence report format (when pinned ≠ tip)
+
+```
+ROCM-SYSTEMS DIVERGENCE DETECTED
+
+  TheRock branch:        <therock-branch>
+  Expected rocm-systems: <mapped-branch>
+  Pinned SHA:            <pinned-sha>     ← what TheRock builds today
+  Branch tip SHA:        <tip-sha>
+  Commits ahead of pin:  <N>
+  Commits behind pin:    <M>
+
+  Recent commits on <mapped-branch> not yet pinned in TheRock:
+    <hash> <subject>
+    ...
+
+  Choose:
+    (a) Use rocm-systems <mapped-branch> tip (<tip-sha>) — likely has fixes not yet bumped into TheRock; agents may commit on this branch
+    (b) Use TheRock's pinned SHA (<pinned-sha>) — detached HEAD; READ-ONLY, no commits possible
+```
+
 ### Hard refusal — committing in detached HEAD
 
-If you are asked to commit and `rocm-systems` is in detached HEAD, **REFUSE**. Do not run `git commit`. Instead:
+If you are asked to commit and `rocm-systems` is in detached HEAD, **REFUSE**. Do not run `git commit`. Run the alignment procedure above:
 
-1. Run the alignment check from the protocol.
-2. If pinned == tip: report what you found, attach via `git -C <workspace>/rocm-systems checkout <mapped-branch>`, then perform the requested commit. The refusal becomes a brief delay, not a halt.
-3. If pinned ≠ tip: output the divergence report from the protocol, state that the commit cannot proceed until the user chooses (a) the branch tip or (b) acknowledges the read-only pinned-SHA path. Do not commit. Do not pick an option for them.
+1. If pinned == tip: report what you found, attach via `git -C <workspace>/rocm-systems checkout <mapped-branch>`, then perform the requested commit. The refusal becomes a brief delay, not a halt.
+2. If pinned ≠ tip: output the divergence report, state that the commit cannot proceed until the user chooses (a) the branch tip or (b) acknowledges the read-only pinned-SHA path. Do not commit. Do not pick an option for them.
 
 A commit landing on an orphaned object is silent data loss — the user has no way to recover the work after the next checkout. Refusal is the right behavior every time.
 
-### Trigger does not fire
+### Wrong resolutions to avoid
 
-If `rocm-systems` is already on the mapped branch (the expected branch for TheRock's current branch), even with local commits ahead of the pinned SHA, the trigger does not fire. That is the normal in-flight development state — proceed with the requested operation without prompting. The user's local branch holds their work; the pin only updates when the gitlink is bumped.
+- ❌ **"I'll create a fresh branch at the pinned SHA so commits aren't detached."** This is the most dangerous wrong answer. Creating `users/<name>/<task>` at the pinned SHA satisfies the never-commit-detached rule on its face but **silently drops every upstream commit** the mapped branch has accumulated since the pin. The user's two options are (a) the mapped-branch tip or (b) acknowledged read-only at the pinned SHA. There is no third option. Do not invent one.
+- ❌ **"Detached HEAD is normal for submodules — proceed with the commit."** Generally true outside this pipeline; here it is the trigger. Refuse the commit, run the check.
+- ❌ **"TheRock pins this SHA on purpose, so committing here matches what TheRock builds."** TheRock builds the gitlinked SHA; the pipeline's commits live on a branch the user can push and merge. A commit at the pinned SHA in detached HEAD is unreachable after the next submodule update — the build correctness argument is irrelevant once the work is lost.
+- ❌ **"The N commits ahead are upstream's problem, not mine; I'll commit on top of the pin."** Divergence between pin and branch tip is exactly what the user must consciously resolve. Surface it, do not pick for them.
+- ❌ **"`git submodule update` then proceed."** That command lands `rocm-systems` detached at the (possibly new) pinned SHA. Always re-run the check after a submodule update.
 
 ## Phase 2.5 Triage Stash
 
