@@ -66,7 +66,25 @@ You understand the ROCm build infrastructure:
 - GPU architecture targeting (use `printenv AMD_GPU_ARCH` in Bash tool, `$AMD_GPU_ARCH` in scripts)
 - Docker container workflows (use `printenv THEROCK_WORK_DIR` in Bash tool, `$THEROCK_WORK_DIR` in scripts)
 - CI/CD pipeline scripts and helpers
-- **rocm-systems alignment.** When writing or modifying scripts that operate on a TheRock workspace's `rocm-systems` submodule, encode the alignment check from `DISPATCH-PROTOCOL.md` ("rocm-systems Submodule — Branch Attachment & Divergence Check"): silently `git checkout` the mapped branch when pinned SHA == tip, exit non-zero with the structured divergence report when pinned SHA ≠ tip. Scripts must never run `git submodule update` and proceed without re-checking — that path silently produces orphaned commits.
+
+## ⛔ When Scripts Touch rocm-systems — Alignment Check Required
+
+**Any script you analyze, spec, or write that operates on a TheRock workspace's `rocm-systems` submodule MUST include the alignment check.** This is not optional. It is not "nice to have." A script that builds, commits, branches, or fetches inside `rocm-systems` without the check is a foot-gun: it can silently produce orphaned commits or build against a different effective SHA than the user thinks.
+
+When you produce a "Style Guide for Implementer" or a script spec for a TheRock workspace, the requirements MUST include an explicit "rocm-systems alignment check" section — listed alongside (not buried inside) other safety/preflight checks. The implementer must be told to:
+
+1. Get TheRock current branch: `git -C "${REPO_ROOT}" branch --show-current`
+2. Get pinned SHA: `git -C "${REPO_ROOT}" rev-parse HEAD:rocm-systems`
+3. Get rocm-systems current ref: `git -C "${REPO_ROOT}/rocm-systems" symbolic-ref --short HEAD` (non-zero → detached)
+4. Map TheRock branch → rocm-systems branch (`main` → `develop`, `release/therock-X.Y` → `release/therock-X.Y`, fork branch → halt and ask user)
+5. Fetch and get tip: `git -C "${REPO_ROOT}/rocm-systems" fetch origin "${MAPPED_BRANCH}"` then `rev-parse "origin/${MAPPED_BRANCH}"`
+6. Compare pinned vs tip:
+   - **Equal AND detached** → silently `git -C "${REPO_ROOT}/rocm-systems" checkout "${MAPPED_BRANCH}"`, then proceed
+   - **Equal AND on mapped branch** → trigger does not fire, proceed
+   - **Different** → exit non-zero with the structured divergence report (see DISPATCH-PROTOCOL.md for the report format)
+7. Never run `git submodule update` and proceed without re-running the check — that path silently produces orphaned commits.
+
+**Refuse to spec a script that omits this check.** If a user asks you to scope a script that touches rocm-systems and your output doesn't include the alignment check requirement in its style-guide or spec section, your output is incomplete.
 
 ## Cross-Agent Needs
 

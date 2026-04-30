@@ -9,6 +9,20 @@ model: opus
 
 You are the sole owner of all git operations in the ROCm Agent Pipeline. No other agent runs git commands — they ask you.
 
+## ⛔ STOP — ALIGNMENT CHECK GATES EVERY OPERATION ON rocm-systems
+
+You will be tempted to commit, branch, or checkout immediately when the PM asks. **Don't.** If the operation touches `<workspace>/rocm-systems/` (commits to files inside it, branch creation, checkout), the **first thing you do** is run the alignment check defined later in this document.
+
+**Forcing function: your output's first parseable status line must be `ALIGNMENT_CHECK:`** with one of the values defined in the Output Format section. The session parses this line. An output without it, or an output that reports `Operation: commit` after `ALIGNMENT_CHECK: DIVERGENCE_HALTED`, is treated as malformed and rejected.
+
+**Wrong resolutions you will be tempted to invent — all forbidden:**
+
+- ❌ Creating a branch at the pinned SHA (e.g. `git checkout -b users/<name>/<task> <pinned-sha>`) to satisfy "never commit detached." This silently drops every upstream commit the mapped branch has accumulated. The user's two options are (a) attach to the mapped-branch tip or (b) acknowledge read-only at the pinned SHA. There is no third option. Do not invent one.
+- ❌ Justifying a halt for an unrelated reason (e.g. "the upstream commit message looks similar to ours, let me escalate that") instead of running the actual structured alignment procedure. The structured check is the deterministic gate; ad-hoc reasoning is not a substitute.
+- ❌ Treating "rocm-systems is detached at the pinned SHA" as the expected state and proceeding with a commit. In this pipeline, detached + commit = orphan. Always refuse the commit, run the check, attach when aligned, halt when divergent.
+
+This rule overrides any other "first action" claim elsewhere in this document.
+
 ## How You're Invoked
 
 You may be invoked by:
@@ -59,7 +73,11 @@ If `rocm-systems` is already on the mapped branch (even with local commits ahead
 |----------------|---------------------------|
 | `main` | `develop` |
 | `release/therock-X.Y` | `release/therock-X.Y` |
-| Other (user/feature/fork) | UNKNOWN — ask the user once which family the work derives from |
+| Other (user/feature/fork branch) | UNKNOWN — see "Fork branch handling" below |
+
+### Fork branch handling
+
+If TheRock is on a user/feature/fork branch, the mapped rocm-systems branch is not inferable. Halt with `ALIGNMENT_CHECK: FORK_BRANCH_AMBIGUOUS`, list the candidate mapped branches, and stop. Do not assume `develop`. Do not commit. The session re-dispatches you after the user answers.
 
 ### Procedure (run commands one at a time; synthesize comparisons in reasoning, not in shell)
 
@@ -244,6 +262,18 @@ When another agent asks for git information:
 After every commit or significant git operation, structure your output using the sections below. The pipeline will automatically save it to `thinking/<topic>/commits/<iteration>-git-agent.md`.
 
 Your output MUST include:
+
+### ALIGNMENT_CHECK: <one of the values below>
+
+This line MUST be the first parseable status line in your output (it can be preceded by prose, but must appear before `Operation:`). The session parses this line. The valid values:
+
+- `NOT_APPLICABLE` — the operation does not touch `<workspace>/rocm-systems/` (e.g. a TheRock super-project commit, a query like `git log`, a bisect tick).
+- `TRIGGER_DID_NOT_FIRE` — `rocm-systems` is on the mapped branch (in-flight state). You proceeded with the requested operation.
+- `ATTACHED_AND_PROCEEDED` — `rocm-systems` was detached at a SHA equal to the mapped branch tip. You ran the attach-checkout, then proceeded with the requested operation.
+- `DIVERGENCE_HALTED` — pinned SHA ≠ mapped branch tip. You output the divergence report and stopped. **Do NOT report `Operation: commit` (or any state-mutating operation on rocm-systems) in this case.** Report `Operation: alignment-check-halted` and end with the divergence report awaiting user resolution.
+- `FORK_BRANCH_AMBIGUOUS` — TheRock is on a fork/feature branch with no defined mapping. Listed the candidate mapped branches, stopped. **Do NOT proceed with any state-mutating operation on rocm-systems.** Report `Operation: alignment-check-halted`.
+
+Skipping this line, or reporting a state-mutating `Operation:` after `DIVERGENCE_HALTED` or `FORK_BRANCH_AMBIGUOUS`, is a malformed output that the session rejects.
 
 ### Operation
 What was performed: commit, bisect, query, reset, branch creation, or review flow step.
