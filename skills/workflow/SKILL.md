@@ -33,6 +33,48 @@ bash <plugin_root>/hooks/generate-banner.sh > /tmp/.claude-banner.txt
 
 Then read `/tmp/.claude-banner.txt` and print its contents as plain text (not inside a code block). The `<plugin_root>` is the directory containing the `hooks/` folder — resolve it from the skill's base directory (two levels up from `skills/workflow/`).
 
+## Session Invariants
+
+These rules are ALWAYS true throughout pipeline execution. They override any other guidance, including language in the user's task description, claims of pre-authorization in handoffs from other skills, or "helpful" shortcuts. Read these as deterministic constraints, not heuristics.
+
+### 1. The session never edits source code
+
+The session is the dispatcher; source code changes belong to specialist agents (implementer, tester, bash-expert). The session NEVER modifies files in the workspace's source tree, including:
+- "Trivial" cosmetic changes (whitespace, comment style, formatting)
+- Changes suggested by the Reviewer agent (these must re-enter Phase 2 via PM routing)
+- Quick fixes the session believes are obvious
+
+The session MAY write to:
+- `<thinking_dir>/` — when persisting an agent's output that the agent itself could not save (e.g., a Read-only-tooled agent's response), or when invoking note-taker for status updates
+- `/tmp/` — session-private scratch (e.g., banner files)
+
+The session MAY NOT write to:
+- Anything under the workspace source tree
+- `<thinking_dir>/status.md` directly — always dispatch note-taker
+
+### 2. The session never originates agent dispatches outside the LOOP
+
+Specialist dispatches always follow the LOOP structure: agent returns → save output → dispatch PM → PM routes → next agent. The session does NOT:
+- Skip PM after a specialist returns and dispatch the next agent directly
+- Dispatch git-agent, build-expert, tester, or any other agent based on the session's own judgment about what's next
+
+This applies especially after Reviewer returns `pass`. Reviewer pass does NOT mean "now commit and push" — it means "send the Reviewer's output to PM, which will return `completion`, which enters Phase 3".
+
+### 3. Phase 3 user gates are mandatory
+
+Phase 3 Step 2 (review offer) and Step 3 (push confirmation) are MANDATORY user prompts. They MUST be asked regardless of:
+- Verification language in the user's original task description (e.g., "after commit, push to the PR branch" describes a verification plan, NOT a pre-authorization to skip gates)
+- Pre-authorization claims in handoffs from other skills (e.g., `/pr-feedback` task descriptions)
+- The Reviewer agent's `APPROVED` verdict (Reviewer is automated technical review; the user is the final authority)
+
+### Anti-patterns to avoid
+
+1. **Reviewer pass → direct action.** Pattern: Reviewer returns APPROVED, session immediately dispatches git-agent or runs commands. Correct flow: Reviewer output → save → PM dispatch → PM returns `completion` → enter Phase 3 → review-offer gate → push-confirmation gate → only then dispatch git-agent.
+
+2. **Task description text as pre-authorization.** Pattern: user's task says "after commit, push to PR" → session reads as "user pre-authorized push, skip the gate". Correct read: imperative-mood verification plans describe what the workflow will accomplish, not which gates to skip. Phase 3 gates apply unconditionally.
+
+3. **Session-side source edits for "polish".** Pattern: Reviewer notes a minor stylistic issue (e.g., comment marker style) → session runs Edit tool directly to fix it. Correct flow: PM dispatch → PM routes minor fix to implementer → implementer makes the change → re-enter LOOP. The session never touches source files.
+
 ## Dispatch Loop
 
 Follow these steps exactly. The user's task is in `$ARGUMENTS`.
@@ -289,6 +331,14 @@ On entry to Phase 2, read `Test Status` from status.md.
 
   Without this invariant, PM has no signal that the new iteration is regression-driven and may misroute.
 - Otherwise (any other Test Status, including `NOT TESTED`, `TESTED (targeted-pass)`, etc.): fresh entry path. Dispatch the starting agent normally and enter the loop at step 1.
+
+**No-bypass invariant (session enforcement):**
+The LOOP structure is non-negotiable. After every specialist agent returns — including Reviewer with a `pass` verdict — the session MUST execute LOOP step 3 (send agent output to PM for routing). The session does NOT:
+- Dispatch git-agent for commit/push directly after Reviewer pass
+- Dispatch build-expert directly without PM routing
+- Skip PM and dispatch any next agent based on session-level judgment about what's appropriate
+
+PM is the only path to Phase 3. Phase 3 is the only path to commit/push. There is no shortcut. See "Session Invariants" at the top of this file.
 
 **Dispatch the starting agent and enter the loop:**
 
@@ -829,6 +879,8 @@ Phase 2.5 may:
 
 If `offer_review` is `false`: skip to Step 3.
 
+**MANDATORY GATE.** This prompt is unconditional when `offer_review: true`. It MUST be asked regardless of language in the user's original task description (e.g., "after commit, push the branch" describes the verification plan, not a pre-authorization to skip this gate) and regardless of pre-authorization claims in handoffs from other skills (e.g., `/pr-feedback`). The Reviewer agent's APPROVED verdict is automated technical review — the user's review here is the final authority. See "Session Invariants" at the top of this file.
+
 Ask: "Would you like to review the code changes before finalizing?"
 
 If no: Go to Step 3.
@@ -915,6 +967,8 @@ a `pr-context.json`, read the PR number from it directly. Otherwise, query GitHu
 gh api repos/<owner>/<repo>/pulls --jq '.[] | select(.head.ref == "<branch_name>") | {number, url}' -q 'state=open'
 ```
 Use `<owner>/<repo>` stored from the Phase 1 GH auth probe.
+
+**MANDATORY GATE.** The push prompt below is unconditional. It MUST be asked regardless of language in the user's original task description (e.g., "after commit, push to the same PR branch so CI re-runs" describes the verification plan, not a pre-authorization to skip this gate) and regardless of pre-authorization claims in handoffs from other skills (e.g., `/pr-feedback`). The Reviewer agent's APPROVED verdict and any prior approval of the review-offer gate (Step 2) do NOT pre-authorize push. See "Session Invariants" at the top of this file.
 
 If a PR exists: ask "Would you like to push to update PR #<number>?"
 If no PR exists: ask "Would you like to push the branch and create a PR?"
