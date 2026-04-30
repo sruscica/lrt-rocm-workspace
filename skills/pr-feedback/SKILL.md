@@ -347,6 +347,14 @@ If the user says yes:
    the assessment-file reference. If only actionable items exist, omit the
    "Verification gaps" section and the gaps-file reference.
 
+   **Handoff contract.** This task description hands off to `/workflow`, which
+   runs its full Phase 1 → Phase 3 flow. The user gates in `/workflow` Phase 3
+   (review offer and push confirmation) ALWAYS apply — including for PR-feedback
+   tasks. Do not embed imperative push or commit instructions ("After commit,
+   push to the PR branch...") in the task description: the workflow will offer
+   to commit and push at the appropriate gates regardless. The `PR_CONTEXT:`
+   marker above is the only structured handoff signal `/workflow` needs.
+
 3. **Invoke the workflow skill:**
    ```
    Skill(skill: "lrt-rocm:workflow", args: "<task description>")
