@@ -121,8 +121,8 @@ Then branch on the values:
   > git-agent cannot map TheRock's current branch to a rocm-systems branch (TheRock appears to be on a fork branch). Check out the release branch first: `git -C <workspace> checkout <release_branch>`, then re-invoke this skill.
 - **`ALIGNMENT_CHECK: TRIGGER_DID_NOT_FIRE` or `NOT_APPLICABLE`** → halt:
   > Unexpected alignment-check verdict `<verdict>` for a release-line bump. This indicates a workspace state the skill does not handle. Aborting.
-- **`ALIGNMENT_CHECK: READ_ONLY_PINNED`** → halt:
-  > Workspace is in READ_ONLY_PINNED mode. The user previously chose to stay at TheRock's pinned SHA; bumping the gitlink contradicts that choice. Resolve the read-only mode first.
+
+The `ALIGNMENT_CHECK:` enum is exactly the 5 canonical values defined in `agents/DISPATCH-PROTOCOL.md` (`NOT_APPLICABLE`, `TRIGGER_DID_NOT_FIRE`, `ATTACHED_AND_PROCEEDED`, `DIVERGENCE_HALTED`, `FORK_BRANCH_AMBIGUOUS`). `READ_ONLY_PINNED` is a session-mode concept from `/workflow`'s Phase 1.5 pre-flight; it does NOT propagate to this standalone skill, and git-agent does not emit it on the `ALIGNMENT_CHECK:` line. If a user has independently set their workspace into a state that should refuse commits, git-agent's commit-time defenses (Step 6) will catch it.
 
 In every halt case, do NOT dispatch git-agent again. Stop.
 
