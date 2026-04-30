@@ -30,7 +30,7 @@ Parse `$ARGUMENTS` to extract the PR:
 
 Run:
 ```
-gh pr view <number> --repo <owner>/<repo> --json title,headRefName,baseRefName,state,url,body
+gh pr view <number> --repo <owner>/<repo> --json title,headRefName,baseRefName,state,url,body,mergeCommit
 ```
 
 Present to the user:
@@ -363,6 +363,57 @@ If the user says yes:
 The workflow pipeline will detect `branch_action: use-existing` (the PR branch
 is already checked out) and proceed with the regular Phase 1 → Phase 2 → Phase 3 flow.
 The expert assessment file provides context for the pipeline's specialists.
+
+## Step 7: Post-merge gitlink bump offer (release-line PRs only)
+
+This step runs after Step 6 ONLY when Step 6 did not transition to `/workflow`
+(i.e., the user said no, or there were no actionable items / gaps to ask about
+in the first place). If `/workflow` was invoked, this skill has already ended
+and Step 7 is unreachable.
+
+### Trigger conditions (ALL must hold)
+
+Inspect the PR data already fetched in Step 1:
+
+- `state == "MERGED"`
+- The repo (from the parsed PR reference, case-insensitive) is `rocm-systems`
+- `baseRefName` matches the regex `^release/therock-[0-9]+\.[0-9]+$`
+
+If any condition fails, this step is a no-op — return silently. Existing
+behavior is unchanged for unmerged PRs, non-rocm-systems PRs, and
+develop-target PRs.
+
+### Behavior when triggered
+
+Compute `<short_sha>` = first 12 chars of `mergeCommit.oid` (already in the
+Step 1 fetch). Present:
+
+> This PR was merged into `<baseRefName>`. TheRock pins `rocm-systems` per
+> branch, so the matching TheRock release branch needs its gitlink bumped to
+> `<short_sha>`.
+>
+> Update TheRock's gitlink for `<baseRefName>` now?
+
+Wait for explicit `yes`/`no`.
+
+- **no** → exit cleanly: "Skipping gitlink bump. To run it later: `/lrt-rocm:bump-rocm-systems-pin <PR URL>`."
+- **yes** → invoke the bump skill:
+
+  ```
+  Skill(skill: "lrt-rocm:bump-rocm-systems-pin", args: "<PR URL>")
+  ```
+
+The bump skill handles workspace resolution, alignment check via git-agent,
+preview, commit, and push gate independently. This skill's responsibility ends
+once the bump skill is invoked.
+
+### Note on re-entry
+
+A user may re-run `/pr-feedback` on the same merged PR multiple times (e.g.,
+after addressing follow-up reviewer comments that landed post-merge). Step 7
+re-fires every time. The bump skill itself detects whether the gitlink is
+already at the merge SHA and exits without creating a duplicate commit, so the
+re-prompt is harmless.
 
 ---
 
