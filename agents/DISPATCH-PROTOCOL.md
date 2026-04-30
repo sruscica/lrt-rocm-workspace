@@ -169,6 +169,126 @@ When working in a TheRock workspace, use this mapping to identify which build co
 | `compiler/*` | HIP compiler | `ninja -C build hipcc+build` |
 | `base/rocr-runtime/*` | ROCr runtime | `ninja -C build rocr+build` |
 
+## rocm-systems Submodule — Branch Attachment & Divergence Check
+
+TheRock pins `rocm-systems` via a **gitlink** (a specific SHA), not by tracking a branch. After `git submodule update`, `rocm-systems` lands in **detached HEAD** at the pinned SHA. Two failure modes follow if this isn't handled:
+
+- **Orphaned commits.** Any commit an agent makes in detached HEAD is reachable only by SHA. The next checkout, submodule update, or branch switch silently abandons it.
+- **Silent divergence.** Switching TheRock branches does NOT move `rocm-systems`. After `git checkout <other-therock-branch>`, the workspace can build against a different effective `rocm-systems` SHA than the user thinks.
+
+### Branch families
+
+| Repo | Branches |
+|------|----------|
+| TheRock | `main`, `release/therock-X.Y` |
+| rocm-systems | `develop`, `release/therock-X.Y`, `release/rocm-rel-X.Y` (legacy — only when explicitly requested) |
+
+### Branch mapping
+
+| TheRock branch | Mapped rocm-systems branch |
+|----------------|---------------------------|
+| `main` | `develop` |
+| `release/therock-X.Y` | `release/therock-X.Y` |
+| Anything else (user/feature branch, fork) | UNKNOWN — ask the user once which family the work derives from, then apply the mapping |
+
+### Trigger condition
+
+Run the alignment check when **either** of these is true:
+
+- `rocm-systems` is in detached HEAD, OR
+- `rocm-systems` is on a branch that is **not** the mapped branch for TheRock's current branch.
+
+If `rocm-systems` is already on the mapped branch — even with local commits ahead of the pinned SHA — the trigger does **not** fire. That is the normal in-flight development state and must not produce a prompt.
+
+### Procedure
+
+Run these commands one at a time and synthesize the comparison in your reasoning. Do **not** capture outputs into shell variables — the Bash tool's command rules forbid `$VAR` expansion.
+
+1. Get TheRock's current branch:
+
+   ```
+   git -C <workspace> branch --show-current
+   ```
+
+2. Get the SHA TheRock pins for `rocm-systems` (via gitlink):
+
+   ```
+   git -C <workspace> rev-parse HEAD:rocm-systems
+   ```
+
+3. Get `rocm-systems`'s current ref (branch name, or empty if detached):
+
+   ```
+   git -C <workspace>/rocm-systems symbolic-ref --short HEAD
+   ```
+
+   If this command exits non-zero, `rocm-systems` is detached.
+
+4. Determine the mapped rocm-systems branch from the table above. For a TheRock branch not in the table, ask the user which family it derives from before continuing.
+
+5. Get the tip of the mapped rocm-systems branch:
+
+   ```
+   git -C <workspace>/rocm-systems fetch origin <mapped-branch>
+   git -C <workspace>/rocm-systems rev-parse origin/<mapped-branch>
+   ```
+
+6. Compare the pinned SHA (step 2) to the mapped branch tip (step 5):
+
+   - **Equal** → silently attach. Run:
+
+     ```
+     git -C <workspace>/rocm-systems checkout <mapped-branch>
+     ```
+
+     Then proceed with the original task.
+
+   - **Different** → STOP. Gather the divergence details and present the report below. Do not proceed.
+
+### Divergence report (when pinned ≠ tip)
+
+Gather the count delta and recent commit subjects:
+
+```
+git -C <workspace>/rocm-systems rev-list --count <pinned-sha>..origin/<mapped-branch>
+git -C <workspace>/rocm-systems rev-list --count origin/<mapped-branch>..<pinned-sha>
+git -C <workspace>/rocm-systems log --oneline -10 <pinned-sha>..origin/<mapped-branch>
+```
+
+Then output a structured report — substitute concrete values, do not use shell expansion in the rendered text:
+
+```
+ROCM-SYSTEMS DIVERGENCE DETECTED
+
+  TheRock branch:        <therock-branch>
+  Expected rocm-systems: <mapped-branch>
+  Pinned SHA:            <pinned-sha>     ← what TheRock builds today
+  Branch tip SHA:        <tip-sha>
+  Commits ahead of pin:  <N>
+  Commits behind pin:    <M>
+
+  Recent commits on <mapped-branch> not yet pinned in TheRock:
+    <hash> <subject>
+    <hash> <subject>
+    ...
+
+  Choose:
+    (a) Use rocm-systems <mapped-branch> tip (<tip-sha>)
+        — likely has fixes not yet bumped into TheRock
+        — agents may commit on this branch
+    (b) Use TheRock's pinned SHA (<pinned-sha>) — detached HEAD
+        — matches what TheRock builds today
+        — READ-ONLY: no commits possible
+```
+
+State the need for a user decision and stop. Do not guess.
+
+### Hard rules
+
+- **Never commit in detached HEAD.** If you are asked to commit and `rocm-systems` is detached, refuse and surface the alignment check (or divergence report). Orphaned commits are a silent data-loss bug.
+- **Re-run the check after any TheRock branch switch** you perform. `git checkout <therock-branch>` does NOT move `rocm-systems` — divergence can appear instantly.
+- **Re-run the check after `git submodule update`** in TheRock. That command lands `rocm-systems` in detached HEAD at the (possibly new) pinned SHA.
+
 ## Thinking Directory Structure
 
 ```

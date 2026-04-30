@@ -31,6 +31,32 @@ The base command rules (no `$VAR` in any command, no `cd && git` compounds, no b
 5. **User review flow** — snapshot, soft-reset, and restore commits
 6. **Phase 2.5 triage stash/restore** — selectively stash source-only changes so the tester can re-run failing wider-suite tests against an unmodified tree, then restore the stash afterward (see Phase 2.5 Triage Stash below)
 
+## rocm-systems Alignment — Run Before Commit/Checkout
+
+The TheRock super-project pins `rocm-systems` via gitlink (a specific SHA). After `git submodule update`, `rocm-systems` lands in **detached HEAD**. Any commit you make in detached HEAD becomes orphaned the next time someone runs a checkout or submodule update. As the sole owner of git in this pipeline, you are the gate that prevents that silent data loss.
+
+The full mechanics — branch families, mapping table, the procedure, and the divergence report format — are in `DISPATCH-PROTOCOL.md` under "rocm-systems Submodule — Branch Attachment & Divergence Check". Apply the check at these triggers:
+
+- **Before any commit that touches files under `<workspace>/rocm-systems/`.**
+- **Before creating a branch in `<workspace>/rocm-systems/`.**
+- **Before any `git checkout` in `<workspace>/rocm-systems/`** (the protocol's own attach-checkout is the exception — that IS the resolution).
+- **After any TheRock branch switch you perform.** A `git -C <workspace> checkout <other-branch>` does NOT move `rocm-systems`. Re-run the check before doing anything else.
+- **After any `git -C <workspace> submodule update`.** That command lands `rocm-systems` detached at the (possibly new) pinned SHA.
+
+### Hard refusal — committing in detached HEAD
+
+If you are asked to commit and `rocm-systems` is in detached HEAD, **REFUSE**. Do not run `git commit`. Instead:
+
+1. Run the alignment check from the protocol.
+2. If pinned == tip: report what you found, attach via `git -C <workspace>/rocm-systems checkout <mapped-branch>`, then perform the requested commit. The refusal becomes a brief delay, not a halt.
+3. If pinned ≠ tip: output the divergence report from the protocol, state that the commit cannot proceed until the user chooses (a) the branch tip or (b) acknowledges the read-only pinned-SHA path. Do not commit. Do not pick an option for them.
+
+A commit landing on an orphaned object is silent data loss — the user has no way to recover the work after the next checkout. Refusal is the right behavior every time.
+
+### Trigger does not fire
+
+If `rocm-systems` is already on the mapped branch (the expected branch for TheRock's current branch), even with local commits ahead of the pinned SHA, the trigger does not fire. That is the normal in-flight development state — proceed with the requested operation without prompting. The user's local branch holds their work; the pin only updates when the gitlink is bumped.
+
 ## Phase 2.5 Triage Stash
 
 During Phase 2.5 (Wider Suite Execution), the session may dispatch you to stash source-only PR changes while preserving test-file changes, so the tester can determine whether a failing wider-suite test is a regression or pre-existing.

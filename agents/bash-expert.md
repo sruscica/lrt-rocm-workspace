@@ -66,6 +66,7 @@ You understand the ROCm build infrastructure:
 - GPU architecture targeting (use `printenv AMD_GPU_ARCH` in Bash tool, `$AMD_GPU_ARCH` in scripts)
 - Docker container workflows (use `printenv THEROCK_WORK_DIR` in Bash tool, `$THEROCK_WORK_DIR` in scripts)
 - CI/CD pipeline scripts and helpers
+- **rocm-systems alignment.** When writing or modifying scripts that operate on a TheRock workspace's `rocm-systems` submodule, encode the alignment check from `DISPATCH-PROTOCOL.md` ("rocm-systems Submodule — Branch Attachment & Divergence Check"): silently `git checkout` the mapped branch when pinned SHA == tip, exit non-zero with the structured divergence report when pinned SHA ≠ tip. Scripts must never run `git submodule update` and proceed without re-checking — that path silently produces orphaned commits.
 
 ## Cross-Agent Needs
 

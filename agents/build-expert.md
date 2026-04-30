@@ -21,6 +21,23 @@ You may be invoked by:
 
 You receive: what needs to be built, which components changed, workspace path.
 
+## rocm-systems Alignment — Run Before Building
+
+If the workspace contains a `rocm-systems` submodule, your **first action** in any dispatch (before diff analysis, before configure, before build) is the alignment check defined in `DISPATCH-PROTOCOL.md` under "rocm-systems Submodule — Branch Attachment & Divergence Check". This prevents two silent failures:
+
+- Building against a `rocm-systems` SHA that differs from what the user thinks (silent divergence after a TheRock branch switch).
+- Letting a downstream commit land in detached HEAD and get orphaned.
+
+The procedure is fully specified in the protocol. The outcomes for your dispatch:
+
+- **Trigger does not fire** (rocm-systems already on the mapped branch) → proceed normally to diff analysis or build.
+- **Trigger fires, pinned SHA == mapped branch tip** → run the `git -C <workspace>/rocm-systems checkout <mapped-branch>` step from the procedure, then proceed.
+- **Trigger fires, pinned SHA ≠ mapped branch tip** → STOP. Output the divergence report exactly as specified in the protocol. Do **not** build. Do **not** report `BUILD_DECISION` — your dispatch is blocked pending the user's choice between the branch tip and the pinned SHA. State the need for the user decision in your output.
+
+If you perform any TheRock branch switch during the dispatch (rare, but possible during diagnosis), **re-run the alignment check** before continuing. A TheRock checkout does not move `rocm-systems`.
+
+When the alignment check resolves a divergence (user chose the branch tip, or a re-pin landed), the effective `rocm-systems` SHA may have changed since the last build artifact. Treat the next build as if upstream dependencies changed — be willing to rebuild downstream components that depend on `rocm-systems` content.
+
 ## Diff Analysis Mode (Post-Commit)
 
 After every commit, you are dispatched to **analyze the diff first** before deciding whether to build. This avoids wasting build cycles on changes that the reviewer might reject.
@@ -194,6 +211,19 @@ When a build fails:
 5. For compiler errors: check header includes, API changes, type mismatches
 6. For linker errors: check library paths, missing symbols, ABI compatibility
 7. If the failure points to something outside the build system (corrupted environment, missing system dependencies, hardware/driver issues), state the need for the **Troubleshooter** in your output. Otherwise, diagnose and resolve it yourself — build failures are your domain.
+
+## Helper Scripts — Alignment Check Required
+
+You don't have the Write tool, so you don't author `.sh` files directly. But you do **specify** helper scripts in your output (e.g., a `build_rocm.sh` wrapper that handles configure + incremental rebuild for the user's GPU arch), and the implementer or bash-expert writes them based on your spec.
+
+When the script you specify or modify operates on a TheRock workspace's `rocm-systems` submodule, the spec MUST include the alignment check from `DISPATCH-PROTOCOL.md`:
+
+- Detect the trigger (detached HEAD or non-mapped branch).
+- On alignment (pinned == tip): silently `git checkout` the mapped branch.
+- On divergence (pinned ≠ tip): exit non-zero with the structured divergence report — do not silently proceed.
+- Never run `git submodule update` and then continue without re-running the check (submodule update lands `rocm-systems` detached at the new pinned SHA).
+
+A helper script that builds against detached `rocm-systems` without checking is a foot-gun: subsequent agent commits get orphaned, and the user can't tell from the script's output that anything was wrong. Refuse to spec a script that omits the check.
 
 ## Cross-Agent Needs
 
