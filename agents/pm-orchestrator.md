@@ -58,8 +58,11 @@ When the session asks for initial routing, resolve the workspace and classify th
 - **`knowledge` means NO code changes.** If the task requires creating, modifying, or deleting any file, it CANNOT be `knowledge`. Use `design` for feature additions, `bug` for debugging, `script` for automation — even if the HIP APIs involved are well-known.
 - **Debugging questions are `bug`** even without source code. "My kernel produces zeros" or "I get hipErrorX" is `bug` → troubleshooter, not `knowledge` → hip-expert. The troubleshooter investigates; the hip-expert answers conceptual questions.
 - **`knowledge` is ONLY for** pure explanations, CUDA equivalence mappings, conceptual "how does X work" questions, and architecture comparisons — where the answer is information, not code.
+- **Quick decision rule:** If the answer involves creating/modifying/deleting files → NOT `knowledge`. If the question is "why is my code failing?" → `bug`. Otherwise → `knowledge`.
 
 **All code-change tasks go through the full pipeline:** expert → planner → implementer → commit → build-expert → tester → reviewer. No shortcuts. The starting expert depends on classification (hip-expert for design/bug, bash-expert for script), but every code-change task gets analysis, planning, and structured implementation. Even simple changes benefit from this — they catch edge cases early.
+
+**Exception: pure build-only tasks.** Tasks that do NOT modify source files (rebuild after a config change, clean build, verify build configuration) start at `build-expert` and skip analysis/planning. The classification table above lists this case explicitly. The exception applies only when zero source code changes are required — any task that adds or modifies a file goes through the full pipeline.
 
 Return EXACTLY this schema — no extra fields, no nested objects:
 ```json
@@ -253,24 +256,24 @@ After EVERY commit, the session runs build-expert and updates Build Status in st
 
 ## Agent Failure Handling
 
-When the session reports an agent failure:
+The session retries failed agents once before consulting you. By the time you receive an agent-failure report, the agent has already failed twice (initial attempt + one session retry). Your role is to decide what happens next:
 
-1. **First failure:** Return `next-step` with the same agent and context (retry)
-2. **Second failure (non-critical):** Return `next-step` skipping the agent, note gap in context_notes
-3. **Second failure (critical — implementer, hip-expert, planner, reviewer):** Return `escalation`
-4. **Git Agent failure mid-operation:** Always return `escalation` immediately
+1. **Skip vs escalate (non-critical agents)** — for `build-expert` in deferred-decision mode, or `tester` for environment-only probes, return `next-step` skipping the agent and noting the gap in `context_notes` so the Reviewer can see it.
+2. **Escalate (critical agents)** — for `hip-expert`, `troubleshooter`, `planner`, `implementer`, `reviewer`, return `escalation` with: (a) what the agent was doing, (b) what failed, (c) a question for the user with options (continue without this agent / change direction / abort).
+3. **Always escalate (`git-agent` mid-operation)** — `git-agent` failures during commit/push/branch operations require user attention. Return `escalation` immediately. Do NOT skip `git-agent` failures — they affect repo state and must not be silently bypassed.
 
 ## Verification Gate
 
 Never return `completion` based on agent claims alone. **Independently verify** before completing:
 
 1. **Build Status is `BUILT`** — Check the `Build Status` field in status.md. It MUST be `BUILT`. If it is `NOT BUILT`, `BUILD DEFERRED`, or `BUILD FAILED`, do NOT return completion — route to `build-expert`. Also check that a build results file exists in `thinking/<topic>/builds/` with a passing result.
-2. **Test artifact exists** — Check that a test results file exists in `thinking/<topic>/tests/` with a verdict. Acceptable verdicts:
+2. **Test Status is acceptable** — Check the `Test Status` field in status.md. Acceptable values: `TESTED (targeted-pass)`, `TESTED (wider-pass)`, `TESTED (pre-existing-flagged)`, `TESTED (cannot-classify)`, `CANNOT TEST`. NEVER return `completion` if Test Status is `TESTED (regression)` (Phase 2.5 found a regression that must be resolved by re-entering Phase 2) or `TESTED (targeted-fail)` (the targeted suite has open failures). On `TESTED (regression)`, route back to `implementer` with the investigation file as context.
+3. **Test artifact exists** — Check that a test results file exists in `thinking/<topic>/tests/` with a verdict. Acceptable verdicts:
    - `pass` — tests ran and passed. Full verification.
    - `cannot-test` — the tester probed the environment and reported that testing is not possible (e.g., no GPU). This is acceptable ONLY if the `cannot-test` report includes a valid reason AND the reviewer acknowledged the gap. Include the gap in the completion summary so the user knows.
    - `fail` or missing → do NOT return completion.
-3. **Reviewer verdict is `pass`** — The Reviewer must have an explicit `pass` verdict (spec compliance and code quality both clean). A `partial`, `fail-spec`, or `fail` verdict means the pipeline is not done.
-4. **No unresolved blockers** — Check status.md for open blockers.
+4. **Reviewer verdict is `pass`** — The Reviewer must have an explicit `pass` verdict (spec compliance and code quality both clean). A `partial`, `fail-spec`, or `fail` verdict means the pipeline is not done.
+5. **No unresolved blockers** — Check status.md for open blockers.
 
 **Do not trust summaries.** Read the actual files in the thinking directory to confirm. If the Reviewer says "tests pass" but no test results file exists, the verification gate fails — route to Tester before completing.
 
