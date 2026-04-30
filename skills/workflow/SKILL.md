@@ -339,7 +339,14 @@ LOOP:
            "Create a new branch for this task and switch to it. Examine existing branches to determine the repo's naming convention, then create a branch name that matches the convention and describes the task. Base the branch on origin/<branch_base>. Working directory: <workspace>. Task: <task_summary>. Username: <username>"
          - Save the branch name from the Git Agent's output
          - Set `branch_created = true`
-       - Dispatch Git Agent to commit specified files
+       - Augment commit message with Claude signature (session enforcement):
+         - Take PM's `message` field as `<commit_message>`.
+         - Trim trailing whitespace from `<commit_message>`.
+         - If `<commit_message>` already ends with a `🤖 Claude Code 🤖` line
+           (defensive — PM was not instructed to include it, but enforce here),
+           leave it as-is. Otherwise, append `\n\n🤖 Claude Code 🤖`.
+         - Pass `<commit_message>` (NOT the raw PM message) to the Git Agent.
+       - Dispatch Git Agent to commit specified files using `<commit_message>`
        - Handle output saving for Git Agent (must include the commit hash)
        - Dispatch Note-taker to update status.md Commits table with the new hash
        - Run the Mandatory Post-Commit Sequence (see below)
@@ -992,6 +999,9 @@ If yes:
       will deterministically append one after your body if pre-existing
       failures were surfaced. Any `## Known Issues` heading you produce
       will be stripped to prevent duplicates.
+    - DO NOT include a Claude signature line (e.g. `🤖 Claude Code 🤖`).
+      The session will deterministically append one. Any signature line
+      you produce will be stripped to prevent duplicates.
 
     Completion summary: <PM's completion summary from the completion response>
 
@@ -1029,7 +1039,7 @@ If yes:
 
     **Compose final PR body (deterministic, session-side):**
     Final body order: PM body → Environment (if hardware tested) → Known Issues
-    (if Phase 2.5 surfaced any).
+    (if Phase 2.5 surfaced any) → Claude signature.
 
     1. Take the PM-returned `body` string as `<working_body>`.
 
@@ -1055,7 +1065,14 @@ If yes:
        b. Append `<known_issues_section>` to `<working_body>` with one blank
           line of separation.
 
-    4. Save `<working_body>` as `<final_body>`. Pass `<final_body>` (NOT the raw
+    4. Append Claude signature (always — every pipeline-created PR carries it):
+       a. Strip any trailing `🤖 Claude Code 🤖` line from `<working_body>`
+          (defensive — PM was instructed to omit, but enforce here to prevent
+          duplicates).
+       b. Trim trailing whitespace from `<working_body>`.
+       c. Append `\n\n🤖 Claude Code 🤖` to `<working_body>`.
+
+    5. Save `<working_body>` as `<final_body>`. Pass `<final_body>` (NOT the raw
        PM body) into the Git Agent dispatch in step 3c.
 
 3c. Dispatch Git Agent to push (and create PR if needed):

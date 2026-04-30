@@ -275,6 +275,17 @@ Each test case is a mock prompt dispatched through the pipeline, with expected r
   - Expected: PM returns `type: "commit"` with structured message (feat/fix prefix, Changes: bullets)
   - Pass criteria: git-agent receives well-formed commit message
 
+- [ ] **W-G7a**: Claude signature appended to commit messages and PR body
+  - Prompt: Any implementation task that reaches commit + push + PR creation
+  - Expected: session augments PM's commit message with `🤖 Claude Code 🤖`
+    before dispatching git-agent; PR body compose step appends the same
+    signature after Environment/Known Issues sections
+  - Pass criteria:
+    - `git log -1 --format=%B <commit>` ends with `🤖 Claude Code 🤖`
+    - The created PR body ends with `🤖 Claude Code 🤖` on its own line
+    - Idempotence: if PM's message/body already contains the signature,
+      it appears exactly once (no duplicates)
+
 ### 4.3 Code Review Cycles
 
 - [ ] **W-G8**: Reviewer pass → completion
