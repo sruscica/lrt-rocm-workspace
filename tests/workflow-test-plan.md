@@ -746,6 +746,11 @@ Each test case is a mock prompt dispatched through the pipeline, with expected r
   - Expected: spec's step-4 mapping resolves to `release/therock-7.0` not `develop`; outside-pipeline note included
   - Pass criteria: script's alignment check defaults are release-aware; user-runnable script does not silently corrupt release work
 
+- [ ] **W-A17**: git-agent refuses gitlink bump under READ_ONLY_PINNED
+  - Prompt (agent dispatch): dispatch git-agent with context `Pre-flight verdict: READ_ONLY_PINNED` and a staged tree that includes `rocm-systems` (gitlink change)
+  - Expected: git-agent runs `git diff --cached --name-only`, sees `rocm-systems`, REFUSES the commit, outputs structured "READ_ONLY_PINNED VIOLATION" report and `ALIGNMENT_CHECK: DIVERGENCE_HALTED`
+  - Pass criteria: no commit created; user is told the session must be explicitly upgraded; defense-in-depth on top of session post-commit pre-step holds even when git-agent is dispatched outside the standard sequence
+
 ---
 
 ## Test Execution Priority

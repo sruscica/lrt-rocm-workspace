@@ -140,6 +140,39 @@ If you are asked to commit and `rocm-systems` is in detached HEAD, **REFUSE**. D
 
 A commit landing on an orphaned object is silent data loss — the user has no way to recover the work after the next checkout. Refusal is the right behavior every time.
 
+### Hard refusal — bumping the gitlink while READ_ONLY_PINNED
+
+The session's Phase 1.5 pre-flight may have placed the workflow into `READ_ONLY_PINNED` mode. This happens when divergence was detected and the user chose option (b) — acknowledged read-only at TheRock's pinned SHA. Your dispatch context will include a line such as:
+
+```
+ROCM-SYSTEMS ALIGNMENT CONTEXT (from session pre-flight):
+  ...
+  Pre-flight verdict:    READ_ONLY_PINNED
+```
+
+When `READ_ONLY_PINNED` is active you MUST refuse any commit that would update the `rocm-systems` gitlink in TheRock — i.e., any TheRock commit whose tree changes the `rocm-systems` entry to a new SHA. This includes commits whose staged changes include `rocm-systems` itself, even if the user did not explicitly ask to bump the submodule (a stray `git add rocm-systems` from a script can do it silently).
+
+Procedure when asked to commit while `READ_ONLY_PINNED`:
+
+1. Run `git -C <workspace> diff --cached --name-only` and check whether `rocm-systems` appears.
+2. If `rocm-systems` does NOT appear: the commit does not bump the gitlink. Proceed normally; report `ALIGNMENT_CHECK: ATTACHED_AND_PROCEEDED` (or whichever value reflects the actual rocm-systems-side state from your re-verify).
+3. If `rocm-systems` DOES appear: REFUSE the commit. Output:
+   ```
+   READ_ONLY_PINNED VIOLATION
+
+     Mode:                 READ_ONLY_PINNED (user chose pinned SHA in Phase 1.5)
+     Refused commit:       <subject>
+     Reason:               staged tree changes the rocm-systems gitlink
+
+     The user previously chose to stay at TheRock's pinned rocm-systems SHA.
+     Bumping the gitlink contradicts that choice and would silently end the
+     read-only session. The user must explicitly upgrade the session before
+     this commit can land.
+   ```
+   Then report `ALIGNMENT_CHECK: DIVERGENCE_HALTED`. Do not pick the upgrade for them.
+
+This is defense-in-depth on top of the session's Mandatory Post-Commit Sequence pre-step. The session enforces the gate; you are the second line so a commit cannot slip through if you are dispatched outside the standard sequence (e.g., direct dispatch during debugging).
+
 ### Wrong resolutions to avoid
 
 - ❌ **"I'll create a fresh branch at the pinned SHA so commits aren't detached."** This is the most dangerous wrong answer. Creating `users/<name>/<task>` at the pinned SHA satisfies the never-commit-detached rule on its face but **silently drops every upstream commit** the mapped branch has accumulated since the pin. The user's two options are (a) the mapped-branch tip or (b) acknowledged read-only at the pinned SHA. There is no third option. Do not invent one.
