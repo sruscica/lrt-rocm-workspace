@@ -26,47 +26,48 @@ ln -sfn /home/sruscica/lrt-rocm-workspace ~/.claude/plugins/cache/lrt-marketplac
 
 This system orchestrates multiple AI agents to perform complex ROCm development tasks. The fundamental tension is: **AI agents are probabilistic, but pipeline correctness requires deterministic guarantees.** Every design decision flows from managing this tension.
 
-### Dispatch Loop (SKILL.md)
+### Session as PM (SKILL.md)
 
-The `/workflow` skill (`skills/workflow/SKILL.md`) is the session-level dispatch loop. It holds the Agent tool — no sub-agent does. It follows a strict state machine:
+The `/workflow` skill (`skills/workflow/SKILL.md`) is both the dispatch loop AND the project manager (PM). The session holds the Agent tool, makes routing decisions directly via a routing table, and tracks progress via Claude Code's `TaskCreate`/`TaskUpdate` tools. No sub-agent has the Agent tool.
 
 ```
-Session (you, the dispatch loop — deterministic)
+Session (dispatch loop + PM — routes agents, tracks progress)
   |
-  +-> PM Orchestrator (advisor — returns routing JSON, probabilistic)
+  +-> PM Orchestrator (initial classification + PR content only — 2 dispatches total)
   +-> Specialists (dispatched fresh each time, no memory of prior runs)
   +-> Note-taker (auto-dispatched, writes to thinking directory)
 ```
 
-The session gathers environment info, dispatches PM for routing, normalizes PM output, dispatches specialists, manages state, and enforces invariants. The PM advises; the session decides.
+The session evaluates agent output, applies a routing table to decide what's next, creates visible PM checkpoint tasks between agents, and enforces invariants. The PM Orchestrator sub-agent is only used twice: once for initial task classification (Phase 1) and once for PR body construction (Phase 3).
 
-### PM as Stateless Advisor
+### Routing Table (Session-Level)
 
-The PM Orchestrator (`agents/pm-orchestrator.md`) is a JSON-only advisor. It receives context (task description, agent output, status.md) and returns structured routing decisions. It has **no memory between invocations** — every dispatch is fresh. It sees only what's in the prompt.
+Inter-agent routing is deterministic. The session scans each agent's output for structured signals (verdicts, BUILD_DECISION lines, checkbox completion) and applies a 20-row routing table that maps `(previous_agent, output_signal) → (next_agent, iteration_change)`. This replaced the old model where a PM sub-agent was dispatched after every agent to decide what's next.
 
-Key implication: **the PM cannot reliably enforce complex conditional logic.** It reads instructions once, but "if X AND Y then Z instead of W" competes with simpler patterns. When the PM returns `completion` but Build Status is `BUILD DEFERRED`, it's not being defiant — it just weighted "reviewer passed → completion" higher than the conditional check.
+### PM Orchestrator — Scoped Down
 
-### Session-Level Enforcement (The Reliable Pattern)
+The PM Orchestrator (`agents/pm-orchestrator.md`, ~136 lines) is a JSON-only advisor with exactly 2 response types:
+- `initial-routing` — classifies the task, picks the starting agent and branch action
+- `pr-content` — constructs PR title and body from pipeline results
 
-When something must always happen, put it in SKILL.md, not in PM instructions. The session is deterministic code that Claude follows step-by-step. This pattern is proven across multiple fixes:
+It does NOT make inter-agent routing decisions. The session normalizes its output (Steps 1-7 in SKILL.md) and applies overrides for classification, starting agent, and workspace path.
 
-| What | PM guidance | Session enforcement |
-|------|------------|-------------------|
-| Classification override | PM instructions say knowledge tasks that modify files should be design | Step 5 checks and overrides |
-| Tester routing | PM instructions say test tasks should be script classification | Step 5b checks and overrides |
-| Starting agent | PM instructions list which agents start which task types | Step 6 checks and overrides |
-| Workspace path | PM instructions say use the provided path exactly | Step 7 always uses session's value |
-| Build completion gate | PM instructions say check Build Status before completion | Phase 3 Step 0 checks Build Status and dispatches build-expert if not BUILT |
+### Progress Tracking
 
-**The pattern: PM guides (best-effort), session enforces (guaranteed).** PM instructions still matter — they produce correct routing most of the time, reducing how often the session needs to override. But critical invariants must have session-level enforcement.
+The session maintains a visible checklist using `TaskCreate`/`TaskUpdate`:
+- Initial task list created after user confirms (Phase 1 Step 2)
+- PM checkpoint tasks ("PM: Evaluate <agent> results") between agents
+- Sub-tasks for complex agents (Reviewer: 4 sub-tasks, Implementer: per-plan-step, Tester: 3 sub-tasks)
+- Iteration loop handling creates new tasks with "(iteration N)" suffix
 
 ### Shared State (status.md)
 
 Agents communicate through files in the thinking directory, never through conversation history. `status.md` is the primary shared state file. Key fields:
-- `build_status` — `NOT BUILT`, `BUILT`, `BUILD DEFERRED`, `BUILD FAILED`
+- `Build Status` — `NOT BUILT`, `BUILT`, `BUILD DEFERRED`, `BUILD FAILED`
+- `Test Status` — `NOT TESTED`, `TESTED (targeted-pass)`, `TESTED (wider-pass)`, `TESTED (regression)`, etc.
 - Completed Stages, Current Stage, Blockers, Commits, Agent Activity Log
 
-The session manages state transitions (writing to status.md via note-taker). The PM reads status.md to make routing decisions. This separation — **session writes, PM reads** — keeps state consistent.
+The session manages state transitions (writing to status.md via note-taker). Both Build Status and Test Status reset together on reviewer rejection.
 
 ### Build Status State Machine
 
@@ -100,9 +101,12 @@ The session manages state transitions (writing to status.md via note-taker). The
 
 | File | Role | Key details |
 |------|------|-------------|
-| `skills/workflow/SKILL.md` | Dispatch loop — the session follows this | ~510 lines. Phase 1 (init), normalization steps 1-7, Phase 2 (main loop), post-commit sequence, Phase 3 (completion). Most heavily modified file. |
-| `agents/pm-orchestrator.md` | Routing advisor — returns JSON | Stateless. Classification table, orchestration logic steps 1-10, verification gate, output format rules. |
-| `agents/DISPATCH-PROTOCOL.md` | Reference doc for all agents | Command rules (no `$VAR`, no `cd && git`, no brace expansion), cross-agent communication, thinking directory structure. Not an agent — included in dispatch prompts. |
+| `skills/workflow/SKILL.md` | Dispatch loop + PM — the session follows this | ~1630 lines. Phase 1 (init), normalization steps 1-7, Phase 1.5 (rocm-systems alignment), Phase 2 (main loop with routing table), post-commit sequence, Phase 2.5 (wider suite), Phase 3 (completion). |
+| `skills/workflow/phase-2.5-wider-suite.md` | Wider suite execution state machine | 8-step triage: sanity-check → execution → per-test stash/rebuild/rerun → classification. |
+| `skills/workflow/pre-existing-failures-triage.md` | Pre-existing failures PR integration | GitHub issue search, user triage prompt, issue creation (live/draft). |
+| `skills/workflow/pr-feedback-handoff.md` | PR review comment round-trip | Reply to actionable comments, resolve threads, update PR body. |
+| `agents/pm-orchestrator.md` | Initial classification + PR content | ~136 lines. 2 JSON response types only: initial-routing, pr-content. |
+| `agents/DISPATCH-PROTOCOL.md` | Reference doc for all agents | Command rules (no `$VAR`, no `cd && git`, no brace expansion), cross-agent communication, thinking directory structure. |
 
 ### Specialist Agents
 
@@ -138,8 +142,8 @@ The session manages state transitions (writing to status.md via note-taker). The
 
 ### How to Test Changes
 
-**PM routing tests (fast, seconds each):**
-Dispatch PM as a sub-agent with a mock prompt. Check the JSON output. These test classification, starting agent, and "what's next?" routing.
+**PM classification tests (fast, seconds each):**
+Dispatch PM as a sub-agent with a mock prompt. Check the JSON output for correct classification and starting agent. The PM is only used for initial routing now — inter-agent routing is session-side.
 
 ```
 Agent(subagent_type: "pm-orchestrator", prompt: "ADVISOR MODE. ...")
@@ -148,8 +152,8 @@ Agent(subagent_type: "pm-orchestrator", prompt: "ADVISOR MODE. ...")
 **Specialist behavior tests (medium, 30-90s each):**
 Dispatch a specialist agent with a mock task in a real workspace. Check its output for correct behavior, command compliance, and BUILD_DECISION.
 
-**Session logic tests (analysis only):**
-Some tests verify SKILL.md logic by reading the specification — e.g., "does the post-commit sequence reset Build Status on failure?" These don't need agent dispatches.
+**Session routing tests (analysis only):**
+Verify SKILL.md routing table logic by reading the specification — e.g., "does reviewer pass route to completion?", "does build failure route to implementer with minor iteration?" These don't need agent dispatches.
 
 **Full pipeline tests (expensive, minutes):**
 Run `/workflow` with a real task. Only do this for final validation, not iterative development.
@@ -163,45 +167,45 @@ Every change to this repo should be committed before moving on. This repo tracks
 
 ### Common Pitfalls
 
-- **Don't add complex conditional logic to PM instructions expecting reliable execution.** If it must always work, add session-level enforcement in SKILL.md.
-- **Don't remove "redundant" overrides.** Steps 5, 5b, 6, and 7 look like they duplicate PM instructions, but they exist because the PM doesn't follow those instructions reliably. The overrides are the actual mechanism; PM instructions are guidance.
+- **Don't confuse "PM" (session role) with "PM Orchestrator" (sub-agent).** The session IS the PM for routing decisions. The PM Orchestrator sub-agent only handles initial classification and PR content.
+- **Don't remove JSON normalization overrides (Steps 5, 5b, 6, 7).** These exist because the PM Orchestrator's initial classification is non-deterministic. The overrides are the actual mechanism; PM instructions are guidance.
 - **Don't use `$VAR` expansion in agent definitions or dispatch templates.** Claude Code's AST parser flags these as security risks and prompts the user for approval. Use `printenv VAR`, `git -C /path`, and inline values instead. See DISPATCH-PROTOCOL.md for the full list.
-- **Don't test with the same prompt twice expecting the same PM response.** The PM is non-deterministic. A prompt that returns `bug` once may return `design` next time. Test the session-level enforcement that handles both cases.
+- **Don't add routing logic outside the routing table.** The routing table in SKILL.md is the single source of truth for inter-agent routing. Adding ad-hoc "if agent X returns Y, then do Z" logic elsewhere creates divergence.
+- **Don't forget progress tracking at dispatch points.** Sub-task creation for Reviewer, Implementer, and Tester is defined in the Progress Tracking section. Every dispatch of these agents must create the corresponding sub-tasks.
 
 ## Improvement Philosophy
 
 ### What Makes a Good Improvement
 
-The best improvements to this workflow reduce the gap between what the PM advises and what the session needs. They fall into categories:
+The best improvements to this workflow fall into categories:
 
-1. **State visibility** — Give the PM more explicit state to read (like Build Status in status.md). The PM makes better decisions when the relevant state is a labeled field rather than buried in prose.
-2. **Session guardrails** — Add deterministic checks for invariants the PM sometimes violates. These are cheap (one `if` check) and eliminate entire classes of bugs.
-3. **Agent instruction clarity** — Rewrite agent instructions to be more specific about what to do vs. what not to do. Agents follow clear, concrete rules better than vague guidelines.
-4. **Pipeline simplification** — Remove unnecessary steps, combine redundant dispatches, eliminate agent hops that don't add value. Fewer steps = fewer places for things to go wrong.
+1. **Routing table clarity** — The session routing table is the core decision engine. Additions or changes to routing should be explicit rows, not prose.
+2. **Agent instruction clarity** — Rewrite agent instructions to be more specific about what to do vs. what not to do. Agents follow clear, concrete rules better than vague guidelines.
+3. **Pipeline simplification** — Remove unnecessary steps, combine redundant dispatches, eliminate agent hops that don't add value. Fewer steps = fewer places for things to go wrong.
+4. **Progress tracking fidelity** — Task creation and sub-tasks should match what the session actually dispatches. Gaps between the progress tracking section and the dispatch flow cause silent tracking failures.
 
 ### What to Avoid
 
-- **Over-specifying PM behavior** — Adding more conditional branches to PM instructions has diminishing returns. After ~5 conditions, the PM stops reliably tracking them all.
+- **Over-specifying PM behavior** — The PM is only used for initial classification now. It has ~136 lines of instructions. Adding more conditional branches has diminishing returns.
 - **Premature abstraction** — Don't create "reusable" patterns for things that happen once. The pipeline is already complex enough.
 - **Optimizing for the happy path** — Most bugs are in edge cases (reviewer rejects, builds fail, agents time out). Test the unhappy paths.
+- **Inconsistent terminology** — After the PM merge refactor, "PM" means two things: the session's PM role (routing, checkpoints) and the PM Orchestrator sub-agent (classification, PR content). Be explicit about which one you mean.
 
 ### How to Evaluate Whether a Change Worked
 
-Run the relevant test cases from `tests/workflow-test-plan.md`. For PM routing changes, run at least 3 dispatches with the same prompt to account for non-determinism. A change that passes 2/3 times is not reliable — add session-level enforcement.
+Run the relevant test cases from `tests/workflow-test-plan.md`. For PM classification changes, run at least 3 dispatches with the same prompt to account for non-determinism. For routing table changes, trace the state machine on paper (the routing table is deterministic — if it's right in the spec, it's right in execution).
 
 ## Known Issues and Improvement Areas
 
-### Open Issues (from test plan execution)
+### Open Issues
+
+These are minor issues from the old PM routing model. With the session routing table, the PM's inter-agent routing behavior no longer matters — only its initial classification does.
 
 | Issue | Priority | Description |
 |-------|----------|-------------|
-| PM routes `partial` to planner instead of implementer | Low | PM orchestrator spec says partial → implementer, but PM sends to planner. Extra hop is harmless. |
-| PM uses `major` iteration for `fail-spec` | Low | Spec says minor. PM escalates. Cosmetic (numbering only). |
-| PM tries to fix non-critical agent failure instead of skipping | Low | PM improvises a workaround instead of following skip rules. Arguably better. |
+| PM initial classification non-determinism | Low | PM sometimes classifies the same task differently across runs. Session overrides (Steps 5, 5b, 6) catch the common misclassifications. |
 
 ### Potential Improvement Areas
 
-- **Test Status tracking** — Build Status works well. A similar `Test Status` field in status.md could give the PM better test-aware routing (NOT TESTED, TESTED (pass), TESTED (fail), CANNOT TEST).
-- **PM context condensation** — As pipelines run longer, the PM prompt gets larger. A summary mechanism for earlier iterations could keep PM prompts focused.
 - **Agent output structure enforcement** — Agents sometimes return free-form text instead of the structured sections their definitions specify. A validation step could catch this.
-- **Iteration budget awareness** — The PM doesn't reliably track which major iteration it's on. Putting the iteration count prominently in status.md (like Build Status) could help.
+- **Progress tracking automation** — Sub-task completion for the implementer currently relies on the session parsing checkbox output. A more structured signal from the implementer would be more reliable.

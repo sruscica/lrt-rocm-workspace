@@ -208,7 +208,7 @@ TaskCreate: subject="Push: Create PR"                  activeForm="Creating PR..
 
 ## Dispatch Loop
 
-Follow these steps exactly. The user's task is in `$ARGUMENTS`.
+Follow these steps exactly. The user's task description is the argument passed to `/workflow`.
 
 ### Phase 1: Initialization
 
@@ -259,7 +259,7 @@ Agent(subagent_type: "pm-orchestrator", prompt: """
 ADVISOR MODE. You do NOT have the Agent tool.
 DO NOT run any Bash commands. All environment info is provided below.
 
-User task: <$ARGUMENTS>
+User task: <user's task description>
 Workspace: <workspace path>
 Docker: <yes/no>
 Environment: THEROCK_WORK_DIR=<value or unset>, PROJECT=<value or unset>, AMD_GPU_ARCH=<value or unset>
@@ -306,6 +306,8 @@ IF `branch_action` is `use-existing`:
 The branch choice is always presented as a question the user actively answers. This prevents accidentally committing new work onto an unrelated branch.
 
 If the user wants a new branch, set `branch_action = "create-new"` regardless of the PM's suggestion. If the user corrects the task summary, re-dispatch PM with the corrections.
+
+**After user confirms:** Create the initial task list from the Progress Tracking section (see "Initial Task List" above). The classification and starting_agent determine which tasks to create.
 
 **Step 3: Create thinking directory**
 
@@ -642,7 +644,8 @@ LOOP:
        - Apply Planner Gate (session enforcement):
          IF next_agent = "implementer" AND no planner artifact exists in <thinking_dir>/plans/:
            Override next_agent to "planner". Log: "Session override: planner required before implementer."
-       - IF next_agent = "reviewer": run the Reviewer Gating Check (see below)
+       - IF next_agent = "implementer": create implementer sub-tasks from the plan (see Progress Tracking → Sub-Tasks → Implementer)
+       - IF next_agent = "reviewer": run the Reviewer Gating Check (see below), which creates reviewer sub-tasks
        - TaskUpdate: mark the next agent's task as `in_progress`
        - Set current agent = next_agent
        - Build context from the previous agent's output and relevant thinking_dir files
@@ -673,7 +676,10 @@ LOOP:
        - Dispatch the target agent with context from the requesting agent's output
        - Handle output saving for target agent
        - Mark consultation sub-task completed
-       - Re-dispatch the original agent with the target's results file path
+       - Re-dispatch the original agent using the standard dispatch template with:
+         - Original task context (same as the initial dispatch)
+         - Added line: "Results from <target_agent> are at: <results_file_path>"
+         - Added line: "Continue your work incorporating those results."
        - CONTINUE LOOP (the resumed agent's output goes through step 3 again)
 
      IF route = "commit" (implementer finished all steps):
@@ -789,10 +795,9 @@ This context is a HINT. State can drift between pre-flight and your dispatch.
   your output but you do not need to re-verify. Note any inconsistency you observe
   between the verdict and what you see.
 
-<task-specific context from PM's context_notes>
-
-Read these files for context:
-<list of pass_files from PM>
+<task-specific context: for the starting agent, use PM's starting_context field.
+For subsequent agents, build context from the previous agent's output and
+relevant thinking_dir files.>
 
 <if this is a re-dispatch after a cross-agent request:>
 Results from <target_agent> are at: <results_file_path>
@@ -802,7 +807,7 @@ Continue your work incorporating those results.
 
 ### Alignment Output Validator
 
-After every dispatch of an agent that touches `rocm-systems` (build-expert, git-agent, bash-expert in mutation mode, troubleshooter, implementer, tester), the session validates the output BEFORE handing it to the PM.
+After every dispatch of an agent that touches `rocm-systems` (build-expert, git-agent, bash-expert in mutation mode, troubleshooter, implementer, tester), the session validates the output BEFORE evaluating it for routing.
 
 **Agents requiring validation:**
 
@@ -830,7 +835,7 @@ retry_count = 0
 loop:
   dispatch agent
   validate output
-  IF valid: break, hand output to PM
+  IF valid: break, proceed to routing evaluation
   IF retry_count < 2:
     retry_count += 1
     re-dispatch with this prepended note:
@@ -895,6 +900,8 @@ Scan the agent's output for phrases like:
 If detected, treat as a `fulfill-request` route. Track `fulfill_request_streak` — if it would exceed 3 consecutive cross-agent requests, escalate to the user (see streak cap in Phase 2 loop body).
 
 **Routing Table:**
+
+"expert" in this table means any of: `hip-expert`, `bash-expert`, or `troubleshooter`.
 
 | Previous agent | Output signal | Route to | Iteration change |
 |---|---|---|---|
@@ -987,7 +994,8 @@ REVIEWER-GATE (for design, bug, script tasks):
      - Handle output saving, then re-check
 
   3. Only after BOTH checks pass: dispatch the reviewer
-     - Include build results file (if present) and test results file in pass_files
+     - Include build results file (if present) and test results file in context
+     - Create reviewer sub-tasks (see Progress Tracking → Sub-Tasks → Reviewer)
 ```
 
 For `knowledge` tasks: skip this check (no build/test expected).
@@ -1016,6 +1024,7 @@ POST-COMMIT:
      a. Update status.md: `Build Status: BUILT` (no compilation needed)
      b. Dispatch tester directly (no build-expert needed):
         "Verify the script/config changes. Workspace: <workspace>."
+        - Create tester sub-tasks (see Progress Tracking → Sub-Tasks → Tester)
         - Handle output saving (tester writes own output)
      c. If tester verdict is `pass`:
         Run the Reviewer Gating Check and dispatch reviewer directly
@@ -1049,6 +1058,7 @@ POST-COMMIT:
           - Dispatch tester:
             "Verify the changes compile and run correctly. Component: <component>.
              Build output: <build results file path>. Workspace: <workspace>."
+            - Create tester sub-tasks (see Progress Tracking → Sub-Tasks → Tester)
             - Handle output saving (tester writes own output)
             - If tester verdict is `pass`: run the Reviewer Gating Check and dispatch reviewer directly (this transition is deterministic per the routing table)
             - If tester verdict is `fail` or `cannot-test`: return tester output to the main loop (session evaluates via routing table)
@@ -1193,10 +1203,10 @@ result, tells the user where to find it, and asks for direction.
 
 **Iteration numbering:**
 - `major.minor` format
-- PM's `iteration_change` field controls this:
-  - `"none"` → no change
-  - `"minor"` → increment minor (1.0 → 1.1)
-  - `"major"` → increment major, reset minor (1.2 → 2.0)
+- The routing table's `Iteration change` column controls this:
+  - `none` → no change
+  - `minor` → increment minor (1.0 → 1.1)
+  - `major` → increment major, reset minor (1.2 → 2.0)
 
 ### Error Handling
 
@@ -1275,7 +1285,7 @@ Phase 2.5 may:
 
 TaskUpdate: mark "Push: Independent verification" as `completed`.
 TaskUpdate: mark "Push: User review" as `in_progress`.
-- What was done (from PM's summary)
+- What was done (session-constructed summary from status.md activity log)
 - Files changed
 - Commits made (read from status.md)
 - Thinking artifacts: `<thinking_dir>/`
