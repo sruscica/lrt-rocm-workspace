@@ -4,12 +4,12 @@
 
 ## How the Pipeline Works
 
-The `/workflow` skill runs a dispatch loop in the session. The session holds the Agent tool — you do not.
+The `/workflow` skill runs a dispatch loop in the session. The session acts as both dispatch loop AND project manager (PM) — it holds the Agent tool, makes routing decisions, and tracks progress via a visible checklist. You do not have the Agent tool.
 
 ```
-Session (dispatch loop, holds Agent tool)
+Session (dispatch loop + PM, holds Agent tool, routes agents, tracks progress)
   |
-  +-> PM Orchestrator (advisor, returns JSON routing)
+  +-> PM Orchestrator (initial classification only — one-time dispatch at start)
   +-> Specialists (dispatched fresh, tool-restricted)
   +-> Note-taker (auto-dispatched for output saving)
 ```
@@ -24,7 +24,7 @@ You cannot dispatch agents. Instead, **state your need in your output**:
 
 > I need the **Tester** to run baseline tests on the `memory/` test category before I can finalize this analysis. The relevant test binaries are at `<workspace>/therock/build/core/hip-tests/build/catch_tests/unit/memory/`.
 
-The session sends your output to the PM Orchestrator. The PM identifies the cross-agent need and returns routing instructions. The session dispatches the target agent with appropriate context.
+The session evaluates your output, detects the cross-agent request, and dispatches the target agent with appropriate context. The results are then passed back to you in a re-dispatch.
 
 **Be specific about what you need:**
 - Which agent

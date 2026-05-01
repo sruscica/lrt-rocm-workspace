@@ -1,6 +1,6 @@
 ---
 name: workflow
-description: Use when the user invokes /workflow to start the ROCm agent pipeline. Dispatches the PM Orchestrator to coordinate specialist agents for HIP/ROCm development tasks.
+description: Use when the user invokes /workflow to start the ROCm agent pipeline. The session acts as PM, routing specialist agents for HIP/ROCm development tasks.
 ---
 
 # ROCm Agent Pipeline
@@ -11,17 +11,17 @@ Launch the full multi-agent orchestration pipeline for ROCm/HIP development work
 
 ## Architecture
 
-You (the session) are the **dispatch loop**. You hold the Agent tool. No sub-agent has it.
+You (the session) are both the **dispatch loop** and the **PM (project manager)**. You hold the Agent tool, make routing decisions, and track progress. No sub-agent has the Agent tool.
 
 ```
-You (session) ── holds Agent tool, runs this loop
+You (session / PM) ── holds Agent tool, routes agents, tracks progress
   |
-  +-> PM Orchestrator (advisor, returns JSON routing)
+  +-> PM Orchestrator (initial classification only — one-time dispatch)
   +-> Specialists (dispatched fresh each time, tool-restricted)
-  +-> Note-taker (auto-dispatched, no PM approval needed)
+  +-> Note-taker (auto-dispatched, no routing approval needed)
 ```
 
-The PM makes routing decisions. You execute them. Agents communicate through files in the thinking directory — never through conversation history.
+You make routing decisions directly — evaluating agent output and deciding what's next. The PM Orchestrator is only used for initial task classification (Phase 1) and PR content generation (Phase 3). Between agents, YOU are the PM. Agents communicate through files in the thinking directory — never through conversation history.
 
 ## Session Invariants
 
@@ -31,7 +31,7 @@ These rules are ALWAYS true throughout pipeline execution. They override any oth
 
 The session is the dispatcher; source code changes belong to specialist agents (implementer, tester, bash-expert). The session NEVER modifies files in the workspace's source tree, including:
 - "Trivial" cosmetic changes (whitespace, comment style, formatting)
-- Changes suggested by the Reviewer agent (these must re-enter Phase 2 via PM routing)
+- Changes suggested by the Reviewer agent (these must re-enter Phase 2 via session routing)
 - Quick fixes the session believes are obvious
 
 The session MAY write to:
@@ -40,13 +40,18 @@ The session MAY NOT write to:
 - Anything under the workspace source tree
 - `<thinking_dir>/status.md` directly — always dispatch note-taker
 
-### 2. The session never originates agent dispatches outside the LOOP
+### 2. The session follows the routing table and tracks progress
 
-Specialist dispatches always follow the LOOP structure: agent returns → save output → dispatch PM → PM routes → next agent. The session does NOT:
-- Skip PM after a specialist returns and dispatch the next agent directly
-- Dispatch git-agent, build-expert, tester, or any other agent based on the session's own judgment about what's next
+After every specialist agent returns, the session MUST:
+1. Save the agent's output (note-taker or agent's own write)
+2. Create a PM checkpoint task ("PM: Evaluate <agent> results") and evaluate the output
+3. Route to the next agent using the Session Routing Logic (see below)
+4. Update the progress checklist via TaskUpdate
 
-This applies especially after Reviewer returns `pass`. Reviewer pass does NOT mean "now commit and push" — it means "send the Reviewer's output to PM, which will return `completion`, which enters Phase 3".
+The session does NOT:
+- Skip the PM evaluation checkpoint — every agent return gets a visible "PM evaluating..." step
+- Route to Phase 3 without going through the routing logic — Reviewer `pass` still requires the PM checkpoint before entering Phase 3
+- Dispatch agents without updating the progress checklist
 
 ### 3. Phase 3 user gates are mandatory
 
@@ -57,11 +62,149 @@ Phase 3 Step 2 (review offer) and Step 3 (push confirmation) are MANDATORY user 
 
 ### Anti-patterns to avoid
 
-1. **Reviewer pass → direct action.** Pattern: Reviewer returns APPROVED, session immediately dispatches git-agent or runs commands. Correct flow: Reviewer output → save → PM dispatch → PM returns `completion` → enter Phase 3 → review-offer gate → push-confirmation gate → only then dispatch git-agent.
+1. **Reviewer pass → direct action.** Pattern: Reviewer returns APPROVED, session immediately dispatches git-agent or runs commands. Correct flow: Reviewer output → save → PM checkpoint (evaluate) → routing logic returns "completion" → enter Phase 3 → review-offer gate → push-confirmation gate → only then dispatch git-agent.
 
 2. **Task description text as pre-authorization.** Pattern: user's task says "after commit, push to PR" → session reads as "user pre-authorized push, skip the gate". Correct read: imperative-mood verification plans describe what the workflow will accomplish, not which gates to skip. Phase 3 gates apply unconditionally.
 
-3. **Session-side source edits for "polish".** Pattern: Reviewer notes a minor stylistic issue (e.g., comment marker style) → session runs Edit tool directly to fix it. Correct flow: PM dispatch → PM routes minor fix to implementer → implementer makes the change → re-enter LOOP. The session never touches source files.
+3. **Session-side source edits for "polish".** Pattern: Reviewer notes a minor stylistic issue (e.g., comment marker style) → session runs Edit tool directly to fix it. Correct flow: route minor fix to implementer → implementer makes the change → re-enter LOOP. The session never touches source files.
+
+4. **Silent routing.** Pattern: session dispatches the next agent without updating the progress checklist. Every agent dispatch MUST be preceded by a TaskUpdate marking the task `in_progress`, and every agent return MUST be followed by a TaskUpdate marking it `completed`.
+
+## Progress Tracking
+
+The session uses `TaskCreate` and `TaskUpdate` to maintain a visible progress checklist throughout pipeline execution. This gives the user real-time visibility into which stage is active, what's coming next, and when the pipeline loops.
+
+### Initial Task List
+
+Create the initial task list after Phase 1 Step 2 (user confirms task). The list is based on the classification and starting_agent.
+
+**script / design tasks:**
+
+```
+TaskCreate: subject="Analyze codebase"          activeForm="Analyzing codebase..."
+TaskCreate: subject="Create implementation plan" activeForm="Creating plan..."
+TaskCreate: subject="Implement changes"          activeForm="Implementing changes..."
+TaskCreate: subject="Commit changes"             activeForm="Committing..."
+TaskCreate: subject="Verify build"               activeForm="Verifying build..."
+TaskCreate: subject="Run tests"                  activeForm="Running tests..."
+TaskCreate: subject="Review changes"             activeForm="Reviewing..."
+TaskCreate: subject="Push and create PR"         activeForm="Pushing..."
+```
+
+If `starting_agent` is `planner` (expert analysis not needed): omit "Analyze codebase."
+
+**bug tasks:**
+
+```
+TaskCreate: subject="Investigate issue"          activeForm="Investigating..."
+TaskCreate: subject="Create fix plan"            activeForm="Creating fix plan..."
+TaskCreate: subject="Implement fix"              activeForm="Implementing fix..."
+(remaining same as script from "Commit changes" onward)
+```
+
+**knowledge tasks:**
+
+```
+TaskCreate: subject="Research question"          activeForm="Researching..."
+```
+
+### PM Checkpoint Tasks
+
+After each agent completes, create a PM checkpoint task to make the routing evaluation visible:
+
+```
+TaskCreate: subject="PM: Evaluate <agent> results"  activeForm="PM evaluating..."
+```
+
+Mark it `in_progress` immediately, evaluate the agent's output using the Session Routing Logic, then mark it `completed`. This makes the PM's presence visible in the checklist — the user sees the PM "checking in" between agents.
+
+### Sub-Tasks
+
+Sub-tasks are created when a parent task transitions to `in_progress`. Use the parent name as a prefix for visual hierarchy.
+
+**Reviewer sub-tasks** (created when "Review changes" becomes `in_progress`):
+
+```
+TaskCreate: subject="Review: Check plan compliance"  activeForm="Checking plan compliance..."
+TaskCreate: subject="Review: Verify build results"   activeForm="Verifying build results..."
+TaskCreate: subject="Review: Verify test results"    activeForm="Verifying test results..."
+TaskCreate: subject="Review: Assess code quality"    activeForm="Assessing code quality..."
+```
+
+When the reviewer requests consultation (detected in its output):
+```
+TaskCreate: subject="Review: Consult <expert>"       activeForm="Consulting <expert>..."
+```
+
+All non-consultation sub-tasks are marked `completed` when the reviewer returns its initial output. Consultation sub-tasks are marked `completed` when the consultation agent returns. After the reviewer is re-dispatched with consultation results and returns its final verdict, any remaining sub-tasks are marked `completed`.
+
+**Implementer sub-tasks** (created when "Implement changes" becomes `in_progress`):
+
+Read the plan from `<thinking_dir>/plans/` and create one sub-task per step:
+```
+TaskCreate: subject="Implement: Step N — <short title>"  activeForm="Implementing step N..."
+```
+
+Mark each sub-task `completed` when the implementer's output shows the corresponding checkbox ticked (`- [x]`).
+
+**Tester sub-tasks** (created when "Run tests" becomes `in_progress`):
+
+```
+TaskCreate: subject="Test: Probe environment"   activeForm="Probing environment..."
+TaskCreate: subject="Test: Run test suite"       activeForm="Running tests..."
+TaskCreate: subject="Test: Evaluate results"     activeForm="Evaluating results..."
+```
+
+All marked `completed` when the tester returns.
+
+### Iteration Loop Handling
+
+When the reviewer rejects and routing loops back:
+
+1. Mark "Review changes" as `completed` (it completed — with a reject verdict)
+2. Mark all reviewer sub-tasks as `completed`
+3. Create new tasks for the next iteration:
+
+   **reviewer verdict `partial`** (quality issues → implementer):
+   ```
+   TaskCreate: subject="Re-implement (iteration N)"  activeForm="Re-implementing..."
+   TaskCreate: subject="Commit (iteration N)"        activeForm="Committing..."
+   TaskCreate: subject="Verify build (iteration N)"  activeForm="Verifying build..."
+   TaskCreate: subject="Run tests (iteration N)"     activeForm="Running tests..."
+   TaskCreate: subject="Re-review (iteration N)"     activeForm="Re-reviewing..."
+   ```
+
+   **reviewer verdict `fail-spec`** (spec issues → planner):
+   ```
+   TaskCreate: subject="Re-plan (iteration N)"       activeForm="Re-planning..."
+   (plus re-implement, commit, verify build, run tests, re-review)
+   ```
+
+   **reviewer verdict `fail`** (approach wrong → expert):
+   ```
+   TaskCreate: subject="Re-analyze (iteration N)"    activeForm="Re-analyzing..."
+   (plus re-plan, re-implement, commit, verify build, run tests, re-review)
+   ```
+
+The old completed tasks remain visible, showing the full loop history.
+
+### Phase 3 Tasks
+
+When entering Phase 3, create sub-tasks under "Push and create PR":
+
+```
+TaskCreate: subject="Push: Independent verification"  activeForm="Verifying..."
+TaskCreate: subject="Push: User review"               activeForm="Awaiting review..."
+TaskCreate: subject="Push: Create PR"                  activeForm="Creating PR..."
+```
+
+### Update Rules Summary
+
+1. **Before dispatching an agent**: `TaskUpdate` the corresponding task → `in_progress`
+2. **After agent returns**: `TaskUpdate` → `completed`
+3. **PM checkpoint**: Create "PM: Evaluate..." task → `in_progress` → evaluate → `completed`
+4. **Unexpected routing**: If the routing table leads to an agent not in the current checklist, `TaskCreate` a new task for it
+5. **Fulfill-request**: `TaskCreate` a sub-task "Consult: <agent> for <purpose>" under the requesting agent's task
 
 ## Dispatch Loop
 
@@ -398,29 +541,20 @@ This enforcement runs in the Mandatory Post-Commit Sequence, BEFORE git-agent di
 
 ### Parsing PM Output — JSON Normalization
 
-The PM often returns non-compliant JSON. The session MUST normalize PM output before acting on it. Follow these steps every time you receive PM output:
+The PM is only dispatched for initial routing (Phase 1) and PR content (Phase 3). It often returns non-compliant JSON. The session MUST normalize PM output before acting on it.
 
 **Step 1: Extract JSON.** The PM may include prose before/after the JSON block. Extract only the content inside the ```json fences. Ignore all text outside the fences.
 
-**Step 2: Identify the response type.** Look for a `"type"` field. If missing, infer the type:
+**Step 2: Identify the response type.** Look for a `"type"` field. If missing, infer:
 - If the response has `starting_agent` or `classification` → treat as `initial-routing`
-- If the response has `next_agent` → treat as `next-step`
-- If the response has `target` and `then_resume` → treat as `fulfill-request`
-- If the response has `message` and `files` → treat as `commit`
-- If the response has `summary` → treat as `completion`
-- If the response has `question` and `options` → treat as `escalation`
+- If the response has `title` and `body` → treat as `pr-content`
 
 **Step 3: Extract required fields for the identified type.** Ignore ALL extra fields. Only use:
 
 | Type | Required fields |
 |------|----------------|
 | `initial-routing` | `workspace`, `branch_action`, `task_summary`, `topic_slug`, `starting_agent`, `starting_context`, `classification` |
-| `next-step` | `next_agent`, `context_notes`, `pass_files`, `iteration_change` |
-| `fulfill-request` | `target`, `context_notes`, `pass_files`, `then_resume`, `resume_context` |
-| `commit` | `message`, `files` |
-| `completion` | `summary`, `offer_review` |
-| `escalation` | `question`, `options` |
-| `bisect` | `known_good`, `known_bad`, `test_description`, `component`, `then_resume`, `resume_context` |
+| `pr-content` | `title`, `body` |
 
 **Step 4: Normalize values.**
 
@@ -445,7 +579,7 @@ Classification — normalize to one of `design`, `bug`, `script`, `knowledge`:
 - `debugging`, `debug`, `troubleshooting` → `bug`
 - `automation`, `scripting` → `script`
 
-`starting_context` / `context_notes` — if the PM returned a nested object instead of a string, extract the `user_request` or `instructions` field from it. If neither exists, JSON.stringify the object.
+`starting_context` — if the PM returned a nested object instead of a string, extract the `user_request` or `instructions` field from it. If neither exists, JSON.stringify the object.
 
 `branch_action` — normalize to `use-existing` or `create-new`:
 - `none`, `N/A`, `""`, `null` → `use-existing`
@@ -473,19 +607,19 @@ On entry to Phase 2, read `Test Status` from status.md.
 - If `TESTED (regression)`: this is a Phase 2.5 Step 7a re-entry. The session MUST:
   1. Read the most recent troubleshooter output file from `<thinking_dir>/investigations/` (sorted by mtime, newest first).
   2. Skip LOOP step 1 (do NOT re-dispatch the agent — troubleshooter already ran in Phase 2.5).
-  3. Enter the LOOP at step 3, sending the troubleshooter output to PM as the agent output.
-  4. PM (now seeing `Test Status: TESTED (regression)` in status.md plus the troubleshooter findings as agent_output) routes to planner or implementer.
+  3. Enter the LOOP at step 3, using the troubleshooter output as the agent output for routing evaluation.
+  4. The session (now seeing `Test Status: TESTED (regression)` in status.md plus the troubleshooter findings) routes to planner or implementer via the routing table.
 
-  Without this invariant, PM has no signal that the new iteration is regression-driven and may misroute.
+  Without this invariant, the session has no signal that the new iteration is regression-driven and may misroute.
 - Otherwise (any other Test Status, including `NOT TESTED`, `TESTED (targeted-pass)`, etc.): fresh entry path. Dispatch the starting agent normally and enter the loop at step 1.
 
 **No-bypass invariant (session enforcement):**
-The LOOP structure is non-negotiable. After every specialist agent returns — including Reviewer with a `pass` verdict — the session MUST execute LOOP step 3 (send agent output to PM for routing). The session does NOT:
-- Dispatch git-agent for commit/push directly after Reviewer pass
-- Dispatch build-expert directly without PM routing
-- Skip PM and dispatch any next agent based on session-level judgment about what's appropriate
+The LOOP structure is non-negotiable. After every specialist agent returns — including Reviewer with a `pass` verdict — the session MUST execute LOOP step 3 (evaluate output via Session Routing Logic). The session does NOT:
+- Dispatch git-agent for commit/push directly after Reviewer pass without going through the routing evaluation
+- Skip the PM checkpoint task between agents
+- Route to Phase 3 without the routing table producing a `completion` result
 
-PM is the only path to Phase 3. Phase 3 is the only path to commit/push. There is no shortcut. See "Session Invariants" at the top of this file.
+The routing table is the only path to Phase 3. Phase 3 is the only path to commit/push. There is no shortcut. See "Session Invariants" at the top of this file.
 
 **Dispatch the starting agent and enter the loop:**
 
@@ -493,58 +627,56 @@ PM is the only path to Phase 3. Phase 3 is the only path to commit/push. There i
 LOOP:
   1. Dispatch the current agent (see "How to Dispatch a Specialist" below)
   2. Handle output saving (see "Note-taker Rules" below)
-  3. Send agent output to PM for routing (see "Ask PM What's Next" below)
-  4. Parse PM response and act on it:
+  3. Evaluate agent output using Session Routing Logic (see above)
+  4. Act on the routing decision:
 
-     **Streak reset (session enforcement):** If PM's `type` is anything OTHER than `fulfill-request`, set `fulfill_request_streak = 0` before processing. Initialize the streak to 0 on first entry to the loop.
+     **Streak reset (session enforcement):** If the routing decision is anything OTHER than `fulfill-request`, set `fulfill_request_streak = 0` before processing. Initialize the streak to 0 on first entry to the loop.
 
-     IF type = "next-step":
-       - Update iteration (session enforcement):
-         IF PM says iteration_change = "major": major++, minor = 0
-         ELSE IF next_agent != previous_agent: minor++
-         (Same-agent re-dispatches do not increment)
+     IF route = "next-agent" (routing table produced a next agent):
+       - Update iteration:
+         Apply the `iteration_change` from the routing table row.
+         IF major: major++, minor = 0
+         ELSE IF minor: minor++
          Update iteration string = "major.minor"
          Set previous_agent = next_agent
        - Apply Planner Gate (session enforcement):
          IF next_agent = "implementer" AND no planner artifact exists in <thinking_dir>/plans/:
            Override next_agent to "planner". Log: "Session override: planner required before implementer."
-         IF next_agent = "commit":
-           This is invalid as a next-step target. Treat as if PM returned type="commit" instead.
        - IF next_agent = "reviewer": run the Reviewer Gating Check (see below)
+       - TaskUpdate: mark the next agent's task as `in_progress`
        - Set current agent = next_agent
-       - Build context from PM's context_notes and pass_files
+       - Build context from the previous agent's output and relevant thinking_dir files
        - CONTINUE LOOP
 
-     IF type = "fulfill-request":
+     IF route = "fulfill-request" (cross-agent request detected):
        - **Loop cap (session enforcement):** Maintain a counter
          `fulfill_request_streak` that increments on each consecutive
-         `fulfill-request` and resets to 0 whenever PM returns any other
-         type. If `fulfill_request_streak` would exceed 3, do NOT dispatch
-         the target. Instead:
+         `fulfill-request` and resets to 0 whenever the routing decision is
+         anything else. If `fulfill_request_streak` would exceed 3, do NOT
+         dispatch the target. Instead:
            - Reset the streak to 0
-           - Ask the user: "PM has requested cross-agent fulfillment 4 times in a row
+           - Ask the user: "Cross-agent fulfillment requested 4 times in a row
              (chain so far: <list of (originator → target) pairs>). This usually
              means the agents cannot agree on what they need. Continue, change
              direction, or abort?"
            - On Continue: increment the streak again and proceed; the cap will
              re-trigger after 3 more requests.
-           - On Change direction: take the user's input as a new task summary,
-             dispatch PM with type="next-step" context describing the user's
-             redirect.
+           - On Change direction: take the user's input as new direction,
+             route based on classification (expert for design, troubleshooter for bug).
            - On Abort: BREAK LOOP and skip to Phase 3 with a status note that
              the pipeline was aborted mid-fulfill-request chain.
          The cap protects against unbounded loops where, e.g., the Reviewer
          requests an expert who requests the Tester who reports a failure that
          the Reviewer interprets as needing another expert.
        - Increment `fulfill_request_streak`
-       - Dispatch the target agent with PM's context_notes
+       - TaskCreate: "Consult: <target> for <purpose>" under the requesting agent
+       - Dispatch the target agent with context from the requesting agent's output
        - Handle output saving for target agent
-       - If then_resume is set: re-dispatch the original agent with
-         the target's results file path and PM's resume_context
-       - Send the resumed agent's output to PM
-       - CONTINUE LOOP
+       - Mark consultation sub-task completed
+       - Re-dispatch the original agent with the target's results file path
+       - CONTINUE LOOP (the resumed agent's output goes through step 3 again)
 
-     IF type = "commit":
+     IF route = "commit" (implementer finished all steps):
        - Apply Planner Gate (session enforcement):
          IF classification is "design", "bug", or "script" (code-change tasks):
            IF no planner artifact exists in <thinking_dir>/plans/:
@@ -559,18 +691,17 @@ LOOP:
            "Create a new branch for this task and switch to it. Examine existing branches to determine the repo's naming convention, then create a branch name that matches the convention and describes the task. Base the branch on origin/<branch_base>. Working directory: <workspace>. Task: <task_summary>. Username: <username>"
          - Save the branch name from the Git Agent's output
          - Set `branch_created = true`
-       - Augment commit message with Claude signature (session enforcement):
-         - Take PM's `message` field as `<commit_message>`.
-         - Trim trailing whitespace from `<commit_message>`.
-         - If `<commit_message>` already ends with a `🤖 Claude Code 🤖` line
-           (defensive — PM was not instructed to include it, but enforce here),
-           leave it as-is. Otherwise, append `\n\n🤖 Claude Code 🤖`.
-         - Pass `<commit_message>` (NOT the raw PM message) to the Git Agent.
+       - Construct commit message (session builds this directly):
+         - Read the plan from `<thinking_dir>/plans/` for summary
+         - Read the implementer output for list of changed files
+         - Build: `<short summary>\n\n<key modifications>\n\n🤖 Claude Code 🤖`
+         - Trim trailing whitespace. Ensure signature line is present exactly once.
        - Dispatch Git Agent to commit specified files using `<commit_message>`
        - Handle output saving for Git Agent (must include the commit hash)
        - Dispatch Note-taker to update status.md Commits table with the new hash
+       - TaskUpdate: mark "Commit changes" as `completed`
        - Run the Mandatory Post-Commit Sequence (see below)
-       - Send result to PM (reviewer output if tester passed, tester output if tester failed, build-expert analysis if deferred)
+       - The post-commit sequence handles build → test → reviewer routing directly
        - CONTINUE LOOP
 
      **Commit hash maintenance:** Whenever a commit hash changes (amend,
@@ -578,42 +709,39 @@ LOOP:
      dispatch Note-taker to update the Commits table in status.md with
      the new hash. Stale hashes make status.md unreliable for debugging.
 
-     IF type = "completion":
+     IF route = "completion" (reviewer passed):
+       - TaskUpdate: mark "Review changes" and all sub-tasks as `completed`
        - Go to Phase 3 (Completion Flow)
        - BREAK LOOP
 
-     IF type = "escalation":
+     IF route = "escalation" (planning blocked, git failure, or ambiguous situation):
        - Hardware-bound handoff enforcement (session guarantee — do BEFORE
          presenting options to the user):
          IF the most recent specialist output contains a section header
          "## Hardware Constraint":
-           IF PM's options list does NOT already include an option whose text
-           contains the word "handoff" (case-insensitive):
-             Append this exact option to PM's options list:
-               "Produce a runnable handoff plan I can execute on the remote hardware"
+           Build options list including:
+             "Produce a runnable handoff plan I can execute on the remote hardware"
            Set hardware_handoff_offered = true
          ELSE:
            Set hardware_handoff_offered = false
-       - Present PM's question and options to the user
+       - Present the question and options to the user
        - IF hardware_handoff_offered AND user picked the handoff option:
-         - Do NOT route the answer back to PM. Dispatch bash-expert directly
-           using the Hardware Handoff Dispatch template (see "Hardware Handoff
-           Dispatch" subsection below).
+         - Dispatch bash-expert directly using the Hardware Handoff Dispatch
+           template (see "Hardware Handoff Dispatch" subsection below).
          - After bash-expert finishes, save its output via note-taker to
            <thinking_dir>/scripts/<iteration>-bash-expert-handoff.md
          - Tell the user where the handoff plan was written and ask whether
            to continue the pipeline (e.g. with another agent) or end here.
          - If they end → go to Phase 3 (Completion Flow), BREAK LOOP
-         - Otherwise treat their direction as a new task input and re-dispatch
-           PM for fresh routing.
+         - Otherwise treat their direction as a new task input and route
+           based on classification.
        - ELSE:
-         - Send user's answer back to PM
-         - PM returns new routing
+         - Take user's answer and use it to determine next routing
          - CONTINUE LOOP
 
-     IF type = "bisect":
+     IF route = "bisect" (troubleshooter identified a regression range):
        - Run the Bisect Inner Loop (see below)
-       - Send results to PM
+       - Route the bisect results through step 3 (evaluate output)
        - CONTINUE LOOP
 ```
 
@@ -720,43 +848,91 @@ loop:
 
 The retry cap is 2 (so the agent is invoked at most 3 times for the same step). Do NOT let validation misses cascade silently — they hide the failure mode this whole architecture exists to prevent.
 
-### Ask PM What's Next
+### Session Routing Logic
 
-After every specialist finishes:
+After every specialist finishes, the session evaluates the agent's output and decides what's next. This replaces the PM dispatch for inter-agent routing — the session IS the PM for routing decisions.
 
-```
-Agent(subagent_type: "pm-orchestrator", prompt: """
-ADVISOR MODE. Return ONLY a JSON block, no prose.
+**Routing evaluation steps:**
 
-Iteration: <iteration>
-Agent that just finished: <agent_name>
-Their output summary:
----
-<agent output, or a summary if very long>
----
+1. **Create PM checkpoint task:** `TaskCreate: subject="PM: Evaluate <agent> results" activeForm="PM evaluating..."` → mark `in_progress`
+2. **Parse agent output for signals** (see Output Signal Detection below)
+3. **Check for cross-agent requests** (see Cross-Agent Request Detection below)
+4. **Apply routing table** (see Routing Table below)
+5. **Mark PM checkpoint completed** and update progress checklist
 
-Current status.md:
----
-<read status.md from thinking dir>
----
+**Output Signal Detection:**
 
-What should happen next? Respond with ONLY a JSON block using one of these EXACT schemas:
+Scan the agent's output for these patterns to determine the output signal:
 
-next-step: {"type":"next-step", "next_agent":"<name>", "context_notes":"<string>", "pass_files":["<files>"], "iteration_change":"none|minor|major"}
+| Agent | Signal | Detection |
+|-------|--------|-----------|
+| expert (hip-expert, bash-expert, troubleshooter) | actionable items | Output contains a recommendations/approach section with concrete changes to make |
+| expert | no actionable items | Output is purely informational with no code changes recommended |
+| planner | plan produced | Output contains numbered steps with file paths and acceptance criteria |
+| planner | planning blocked | Output states it cannot produce a plan (missing info, unclear scope) |
+| implementer | all steps done | All plan step checkboxes are ticked (`- [x]`), or output states "all steps complete" |
+| git-agent (commit) | success | Output contains a commit hash (`Commit hash: <sha>` or similar) |
+| git-agent (commit) | failure | Output reports git error, merge conflict, or hook failure |
+| build-expert | BUILT + passed | Output contains `BUILD_DECISION: BUILD_NOW` or `BUILD_DECISION: BUILD_REQUIRED` AND no build errors |
+| build-expert | BUILT + failed | Output contains BUILD_DECISION with build errors |
+| build-expert | DEFERRED | Output contains `BUILD_DECISION: DEFERRED` |
+| tester | pass | Verdict is pass, all tests passed |
+| tester | fail | Verdict is fail, one or more tests failed |
+| tester | cannot-test | Verdict is cannot-test (missing GPU, env issue) |
+| reviewer | pass | Verdict is `pass` or `APPROVED` |
+| reviewer | partial | Verdict is `partial` (quality issues, minor fixes needed) |
+| reviewer | fail-spec | Verdict is `fail-spec` (implementation doesn't match spec) |
+| reviewer | fail | Verdict is `fail` (approach is wrong, needs rethinking) |
 
-fulfill-request: {"type":"fulfill-request", "target":"<agent>", "context_notes":"<string>", "pass_files":["<files>"], "then_resume":"<agent or null>", "resume_context":"<string>"}
+**Cross-Agent Request Detection:**
 
-commit: {"type":"commit", "message":"<commit message>", "files":["<files to stage>"]}
+Scan the agent's output for phrases like:
+- "I need the **<Agent>** to..."
+- "This requires **<Agent>** analysis"
+- "Request: dispatch **<Agent>** for..."
+- "The **<Agent>** should review..."
 
-completion: {"type":"completion", "summary":"<what was accomplished>", "offer_review":true}
+If detected, treat as a `fulfill-request` route. Track `fulfill_request_streak` — if it would exceed 3 consecutive cross-agent requests, escalate to the user (see streak cap in Phase 2 loop body).
 
-escalation: {"type":"escalation", "question":"<what to ask user>", "options":["<option1>","<option2>"]}
+**Routing Table:**
 
-bisect: {"type":"bisect", "known_good":"<hash>", "known_bad":"<hash>", "test_description":"<what to test>", "component":"<what to build>", "then_resume":"troubleshooter", "resume_context":"<what to tell troubleshooter>"}
-""")
-```
+| Previous agent | Output signal | Route to | Iteration change |
+|---|---|---|---|
+| expert | actionable items | → planner | none |
+| expert | no actionable items | → completion | none |
+| expert | cross-agent request | → fulfill target agent | none |
+| planner | plan produced | → implementer | none |
+| planner | planning blocked | → escalation (ask user) | none |
+| implementer | all steps done | → commit (dispatch git-agent) | none |
+| implementer | cross-agent request | → fulfill target agent | none |
+| git-agent (commit) | success | → post-commit sequence | none |
+| git-agent (commit) | failure | → escalation (ask user) | none |
+| build-expert | BUILT + passed | → tester | none |
+| build-expert | BUILT + failed | → implementer | minor |
+| build-expert | DEFERRED | → reviewer | none |
+| tester | pass | → reviewer | none |
+| tester | fail | → implementer | minor |
+| tester | cannot-test | → reviewer | none |
+| reviewer | pass | → Phase 3 (completion) | none |
+| reviewer | partial | → implementer | minor |
+| reviewer | fail-spec | → planner | minor |
+| reviewer | fail | → expert (hip-expert or bash-expert based on classification) | major |
+| reviewer | consultation request | → fulfill target agent, then re-dispatch reviewer | none |
 
-After receiving PM output, apply the **Parsing PM Output — JSON Normalization** steps before acting on the routing.
+**Commit message construction (when routing to commit):**
+
+The session constructs the commit message itself:
+1. Read the plan from `<thinking_dir>/plans/` for the summary of what was implemented
+2. Read the implementer output for the list of changed files
+3. Construct: `<short summary of changes>\n\n<list of key modifications>\n\n🤖 Claude Code 🤖`
+4. Determine files to stage from the implementer's output (files it created or modified)
+
+**Completion detection (when routing to Phase 3):**
+
+When the reviewer passes, the session constructs the completion summary:
+1. Read status.md for the full activity log
+2. Summarize what was accomplished (from the task summary + plan + results)
+3. Set `offer_review = true` for code-change tasks, `false` for knowledge tasks
 
 ### Note-taker Rules
 
@@ -843,9 +1019,9 @@ POST-COMMIT:
         - Handle output saving (tester writes own output)
      c. If tester verdict is `pass`:
         Run the Reviewer Gating Check and dispatch reviewer directly
-        (skip PM — this transition is deterministic)
+        (this transition is deterministic per the routing table)
      d. If tester verdict is `fail` or `cannot-test`:
-        Return tester output to the main loop (sent to PM for routing)
+        Return tester output to the main loop (session evaluates via routing table)
 
   COMPILED PATH:
      a. Determine the build component from the committed files:
@@ -874,19 +1050,18 @@ POST-COMMIT:
             "Verify the changes compile and run correctly. Component: <component>.
              Build output: <build results file path>. Workspace: <workspace>."
             - Handle output saving (tester writes own output)
-            - If tester verdict is `pass`: run the Reviewer Gating Check and dispatch reviewer directly (skip PM — this transition is deterministic)
-            - If tester verdict is `fail` or `cannot-test`: return tester output to the main loop (sent to PM for routing)
+            - If tester verdict is `pass`: run the Reviewer Gating Check and dispatch reviewer directly (this transition is deterministic per the routing table)
+            - If tester verdict is `fail` or `cannot-test`: return tester output to the main loop (session evaluates via routing table)
 
         IF BUILD_DECISION is BUILT AND build FAILED:
           - Update status.md: `Build Status: BUILD FAILED`
           - Do NOT proceed to tester
-          - Send build output to PM. PM routes back to implementer.
+          - Return build output to the main loop (session routes to implementer via routing table).
 
         IF BUILD_DECISION is DEFERRED:
           - Update status.md: `Build Status: BUILD DEFERRED`
           - Do NOT dispatch tester
-          - Return build-expert analysis to the main loop (sent to PM for routing)
-          - PM reads Build Status from status.md and routes to reviewer
+          - Return build-expert analysis to the main loop (session routes to reviewer via routing table)
 ```
 
 When dispatching the reviewer and Build Status is `BUILD DEFERRED`, include in the reviewer's context:
@@ -894,7 +1069,7 @@ When dispatching the reviewer and Build Status is `BUILD DEFERRED`, include in t
 
 ### Build / Test Status Reset (single trigger, two fields)
 
-When the PM routes back to implementer, planner, or hip-expert after a reviewer rejection (`partial`, `fail-spec`, or `fail`), the session MUST update **both** fields in status.md in the same write:
+When the session routes back to implementer, planner, or hip-expert after a reviewer rejection (`partial`, `fail-spec`, or `fail`), the session MUST update **both** fields in status.md in the same write:
 
 - `Build Status: NOT BUILT`
 - `Test Status: NOT TESTED`
@@ -915,7 +1090,7 @@ The wider-suite outcome states (`TESTED (wider-pass)`, `TESTED (regression)`, `T
 
 ### Bisect Inner Loop
 
-When PM returns `type: "bisect"`:
+When the session's routing produces a bisect decision (troubleshooter identified a regression range):
 
 ```
 1. Dispatch git-agent: "Start bisect: git bisect start, git bisect good <known_good>, git bisect bad <known_bad>. Report the first test commit."
@@ -1028,14 +1203,9 @@ result, tells the user where to find it, and asks for direction.
 If an agent dispatch fails (error, timeout, empty output):
 
 1. **Retry once** with the same prompt
-2. If retry fails, dispatch PM:
-   ```
-   Agent(subagent_type: "pm-orchestrator", prompt: """
-   ADVISOR MODE. Agent <name> failed twice. Error: <error>.
-   What was it doing: <context>.
-   Return JSON: escalation (ask user) or next-step (skip and continue).
-   """)
-   ```
+2. If retry fails, the session decides:
+   - **Non-critical agent** (expert, planner, build-expert, tester): present the error to the user and ask whether to skip this agent and continue, retry with different context, or abort. Route the user's choice through the routing table.
+   - **Critical agent** (implementer, reviewer): present the error and ask the user for guidance. These cannot be skipped without losing pipeline integrity.
 3. For Git Agent failures mid-operation: **STOP immediately**. Present the error to the user. Do not retry.
 
 ### Phase 2.5: Wider Suite Execution
@@ -1052,11 +1222,20 @@ Return contract:
 
 ### Phase 3: Completion Flow
 
-When PM returns `type: "completion"`:
+When the routing table produces `completion` (reviewer passed):
+
+Create Phase 3 sub-tasks:
+```
+TaskCreate: subject="Push: Independent verification"  activeForm="Verifying..."
+TaskCreate: subject="Push: User review"               activeForm="Awaiting review..."
+TaskCreate: subject="Push: Create PR"                  activeForm="Creating PR..."
+```
 
 **Step 0: Independent verification (before presenting to user)**
 
-Do NOT trust the PM's completion claim. Verify independently.
+TaskUpdate: mark "Push: Independent verification" as `in_progress`.
+
+Do NOT trust the completion routing blindly. Verify independently.
 
 **For knowledge questions** (classification was `"knowledge"` and `offer_review` is `false`):
 - Only check that `<thinking_dir>/analysis/` contains the expert's output
@@ -1065,7 +1244,7 @@ Do NOT trust the PM's completion claim. Verify independently.
 **For all other tasks** (design, bug, script):
 0. **Check Build Status in status.md.** Read the `Build Status` field.
    - If `BUILT` → continue to checks below
-   - If `BUILD DEFERRED` → verification fails. Do NOT re-dispatch PM. Instead, dispatch build-expert directly: "Reviewer passed. Perform the actual build now." Then dispatch tester after a successful build. Update Build Status to `BUILT`. Then re-enter Phase 3 Step 0 from the top.
+   - If `BUILD DEFERRED` → verification fails. Dispatch build-expert directly: "Reviewer passed. Perform the actual build now." Then dispatch tester after a successful build. Update Build Status to `BUILT`. Then re-enter Phase 3 Step 0 from the top.
    - If `NOT BUILT` or `BUILD FAILED` → verification fails. Dispatch build-expert directly. Same flow as BUILD DEFERRED above.
 1. Check that `<thinking_dir>/builds/` contains a build results file with a passing result
 2. Check that `<thinking_dir>/tests/` contains a test results file. Acceptable verdicts:
@@ -1076,8 +1255,9 @@ Do NOT trust the PM's completion claim. Verify independently.
 
 If checks 1-3 fail (required artifacts missing or show failures):
 - Do NOT present completion to the user
-- Re-dispatch PM with: "Verification gate failed. Missing/failing: [list what's wrong]. Route to the appropriate agent."
-- Re-enter Phase 2
+- TaskUpdate: mark "Push: Independent verification" as `completed` (it completed — with a failure)
+- Route directly to the missing agent: no builds → build-expert, no tests → tester, no review → reviewer
+- Re-enter Phase 2 with the appropriate agent
 
 **Test Status note for Phase 3:** Phase 3 may receive any of `TESTED (targeted-pass | wider-pass | pre-existing-flagged | cannot-classify)` or `CANNOT TEST`. `TESTED (regression)` never reaches Phase 3 — it loops back through Phase 2 from Phase 2.5 Step 7a.
 
@@ -1092,6 +1272,9 @@ Phase 2.5 may:
 - Run wider suite, find regression → loop back through Phase 2 (do NOT continue to Step 1)
 
 **Step 1: Present summary to user** (only after verification passes and Phase 2.5 returns)
+
+TaskUpdate: mark "Push: Independent verification" as `completed`.
+TaskUpdate: mark "Push: User review" as `in_progress`.
 - What was done (from PM's summary)
 - Files changed
 - Commits made (read from status.md)
@@ -1189,20 +1372,24 @@ review, which is exactly what the pipeline exists to prevent.
     - "Yes" / approved: Go to Step 3.
     - "No" / has feedback:
       1. Record the user's feedback
-      2. Send feedback to PM as a new task
+      2. Route feedback through session routing — the session determines the appropriate
+         agent based on the feedback content (implementer for code changes, planner for scope changes)
       3. Re-enter Phase 2 with fresh 3-cycle budget
-      4. When Phase 2 completes and PM returns completion:
+      4. When Phase 2 completes and routing produces completion:
          Re-enter Phase 3 from Step 0 (full verification + review offer again)
 ```
 
-**IMPORTANT:** Phase 3 runs in full every time PM returns `completion`, including
+**IMPORTANT:** Phase 3 runs in full every time routing produces `completion`, including
 after feedback re-entry loops. The user always gets the opportunity to review changes.
 Step 2d (restore) MUST happen before re-entering Phase 2 — the commit stack must be
 intact for the implementer to build on.
 
 **Step 3: Push & PR**
 
-For knowledge tasks (no code changes): skip this step. Done.
+TaskUpdate: mark "Push: User review" as `completed`.
+TaskUpdate: mark "Push: Create PR" as `in_progress`.
+
+For knowledge tasks (no code changes): mark "Push: Create PR" as `completed`. Done.
 
 Detect if a PR already exists for this branch. If the task description references
 a `pr-context.json`, read the PR number from it directly. Otherwise, query GitHub
@@ -1301,7 +1488,7 @@ If yes:
       The session will deterministically append one. Any signature line
       you produce will be stripped to prevent duplicates.
 
-    Completion summary: <PM's completion summary from the completion response>
+    Completion summary: <session-constructed summary of what was accomplished, from status.md activity log>
 
     Commit log:
     ---
@@ -1423,7 +1610,7 @@ If yes:
     Inputs: `<workspace>`, the `pr-context.json` absolute path from the marker
     Outputs: posted replies, resolved review threads, updated PR description,
              `<thinking_dir>/pr-feedback-outcome.json` (consumed by Step 1)
-3e. Present PR URL to user. Done.
+3e. Present PR URL to user. TaskUpdate: mark "Push: Create PR" as `completed`. Done.
 ```
 
 If `git push` or `gh pr create` fails (e.g., no GitHub remote, no `gh` auth,
