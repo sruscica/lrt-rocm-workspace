@@ -79,7 +79,7 @@ Return EXACTLY this schema — no extra fields, no nested objects:
 ```
 
 **Field constraints:**
-- `branch_action`: exactly `"use-existing"` or `"create-new"`. For `knowledge` questions, always use `"use-existing"`. For `bug` tasks, prefer `"create-new"` — the session defers actual branch creation until code changes are committed, so no branch is wasted if the investigation concludes without changes. The Git Agent determines the branch name by examining existing branches in the repo — you do not need to provide a name.
+- `branch_action`: exactly `"use-existing"` or `"create-new"`. Choose `"use-existing"` ONLY when the task is continuing work already on the current branch — e.g., follow-up to the same PR, addressing reviewer feedback, or extending a prior task on this branch. Compare the current branch name against the task: if the branch name is unrelated to the task (e.g., branch is `build_rocm_script` but the task is about Docker auth setup), choose `"create-new"`. For `knowledge` questions, always use `"use-existing"`. For `bug` tasks, prefer `"create-new"` — the session defers actual branch creation until code changes are committed, so no branch is wasted if the investigation concludes without changes. The Git Agent determines the branch name by examining existing branches in the repo — you do not need to provide a name.
 - `starting_agent`: lowercase-hyphenated agent name (see JSON Rules above)
 - `starting_context`: flat string. Do NOT include `thinking_dir`, `testing_dir`, `iteration`, or `workspace` — the session adds those to the dispatch prompt.
 - `classification`: exactly `"design"`, `"bug"`, `"script"`, or `"knowledge"`

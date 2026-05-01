@@ -258,6 +258,12 @@ Each test case is a mock prompt dispatched through the pipeline, with expected r
   - Expected: bug → troubleshooter → analysis concludes "expected behavior per CUDA spec" → completion
   - Pass criteria: no branch created because no commit ever happened
 
+- [ ] **W-G4b**: New task on unrelated existing branch — branch confirmation catches mismatch
+  - Setup: workspace checked out on `amd/dev/sruscica/build_rocm_script`
+  - Prompt: `Add gh CLI installation to the Docker pipeline`
+  - Expected: (1) PM returns `branch_action: "create-new"` (task is unrelated to current branch), (2) Phase 1 Step 2 confirmation explicitly presents the branch as a choice — showing "Continue on this branch, or create a new one?" when PM suggests `use-existing`, or showing current branch name when PM suggests `create-new`
+  - Pass criteria: the confirmation prompt always makes the branch an explicit, answerable question — not just a label the user can skim past. If PM incorrectly suggests `use-existing`, the session's prompt wording makes the mismatch visible.
+
 ### 4.2 Commit Workflows
 
 - [ ] **W-G5**: Post-commit sequence fires automatically

@@ -156,14 +156,25 @@ After receiving PM output, apply the **Parsing PM Output — JSON Normalization*
 
 **Step 2: Confirm with user**
 
-Parse the PM's JSON. Present to the user:
+Parse the PM's JSON. Present the task summary and branch choice to the user. The branch is always an explicit, confirmable part of the prompt — regardless of classification.
 
-> Working in: `<workspace>` (new branch will be created)
-> Task: <task_summary>. Is that right?
+IF `branch_action` is `create-new`:
 
-If `branch_action` is `use-existing`, show the current branch name instead.
+> Task: <task_summary>
+> Branch: New branch will be created (currently on `<current_branch>`)
+>
+> Is that right?
 
-If the user corrects anything, re-dispatch PM with the corrections.
+IF `branch_action` is `use-existing`:
+
+> Task: <task_summary>
+> Branch: `<current_branch>` (existing — PM suggests reusing this branch)
+>
+> Continue on this branch, or create a new one?
+
+The branch choice is always presented as a question the user actively answers. This prevents accidentally committing new work onto an unrelated branch.
+
+If the user wants a new branch, set `branch_action = "create-new"` regardless of the PM's suggestion. If the user corrects the task summary, re-dispatch PM with the corrections.
 
 **Step 3: Create thinking directory**
 
