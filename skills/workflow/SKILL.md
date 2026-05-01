@@ -23,16 +23,6 @@ You (session) ── holds Agent tool, runs this loop
 
 The PM makes routing decisions. You execute them. Agents communicate through files in the thinking directory — never through conversation history.
 
-## User Input Protocol
-
-Before any user-facing prompt during the workflow — confirmations, branch base selection, escalation questions, review offers, push/PR questions, or any AskUserQuestion — the session MUST display the READY FOR INPUT banner. This tells the user the pipeline has paused and is waiting for their input.
-
-```
-bash <plugin_root>/hooks/generate-banner.sh > /tmp/.claude-banner.txt
-```
-
-Then read `/tmp/.claude-banner.txt` and print its contents as plain text (not inside a code block). The `<plugin_root>` is the directory containing the `hooks/` folder — resolve it from the skill's base directory (two levels up from `skills/workflow/`).
-
 ## Session Invariants
 
 These rules are ALWAYS true throughout pipeline execution. They override any other guidance, including language in the user's task description, claims of pre-authorization in handoffs from other skills, or "helpful" shortcuts. Read these as deterministic constraints, not heuristics.
@@ -46,8 +36,6 @@ The session is the dispatcher; source code changes belong to specialist agents (
 
 The session MAY write to:
 - `<thinking_dir>/` — when persisting an agent's output that the agent itself could not save (e.g., a Read-only-tooled agent's response), or when invoking note-taker for status updates
-- `/tmp/` — session-private scratch (e.g., banner files)
-
 The session MAY NOT write to:
 - Anything under the workspace source tree
 - `<thinking_dir>/status.md` directly — always dispatch note-taker
@@ -534,7 +522,6 @@ LOOP:
          type. If `fulfill_request_streak` would exceed 3, do NOT dispatch
          the target. Instead:
            - Reset the streak to 0
-           - Display the READY FOR INPUT banner
            - Ask the user: "PM has requested cross-agent fulfillment 4 times in a row
              (chain so far: <list of (originator → target) pairs>). This usually
              means the agents cannot agree on what they need. Continue, change

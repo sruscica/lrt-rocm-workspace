@@ -19,7 +19,6 @@
     ],
     "Stop": [
       {
-        "minElapsedMs": 30000,
         "hooks": [
           {
             "type": "command",

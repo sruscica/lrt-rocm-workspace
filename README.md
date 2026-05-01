@@ -37,11 +37,9 @@ This will:
 
 ## Features
 
-### Visual Stop Notification
+### Stop Notification
 
-When Claude finishes responding after substantial work (3+ tool calls), it prints a visual "READY FOR INPUT" banner at the end of its response. Additionally, the Stop hook fires after 30+ seconds of work to ring the terminal bell and set the terminal title to "CLAUDE IS READY".
-
-This two-part approach works because Claude Code's Ink TUI captures hook stdout, so visual notifications must come from Claude's own output rather than from the hook script. The hook handles audio/title notifications that work outside Ink's rendering domain.
+When Claude finishes responding, the Stop hook rings the terminal bell and sets the terminal title to "CLAUDE IS READY". This fires on every response via the harness-executed hook in `hooks/hooks.json`, which is deterministic — unlike LLM-instruction-based notifications that are unreliable during complex pipelines.
 
 ## Skills
 
@@ -94,7 +92,6 @@ agents/          named subagent definitions
 hooks/           session-start bootstrap
 scripts/         helper scripts (rk.py, review.py, etc.)
 templates/       workspace scaffolding templates
-workflows/       common procedure documentation
 vscode-plugins/  VSCode MCP extension for diff integration
 ```
 
