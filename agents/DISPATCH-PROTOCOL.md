@@ -20,22 +20,34 @@ Session (dispatch loop + PM, holds Agent tool, routes agents, tracks progress)
 
 ## When You Need Another Agent
 
-You cannot dispatch agents. Instead, **state your need in your output**:
+You cannot dispatch agents. Instead, **emit a structured cross-agent request** in your output using this exact format:
 
-> I need the **Tester** to run baseline tests on the `memory/` test category before I can finalize this analysis. The relevant test binaries are at `<workspace>/therock/build/core/hip-tests/build/catch_tests/unit/memory/`.
+```
+## Cross-Agent Request
+**Target:** <agent-name> (lowercase-hyphenated: tester, hip-expert, bash-expert, build-expert, git-agent, troubleshooter, planner)
+**Task:** <what the target agent should do — be specific>
+**Files:** <relevant file paths, or "n/a" if none>
+**Needed for:** <what you will do with the results when re-dispatched>
+```
 
-The session evaluates your output, detects the cross-agent request, and dispatches the target agent with appropriate context. The results are then passed back to you in a re-dispatch.
+Example:
+```
+## Cross-Agent Request
+**Target:** tester
+**Task:** Run baseline tests for the memory/ test category to establish current pass/fail state.
+**Files:** <workspace>/therock/build/core/hip-tests/build/catch_tests/unit/memory/
+**Needed for:** I need the pass/fail baseline before I can finalize my analysis and determine which tests are affected by the proposed changes.
+```
 
-**Be specific about what you need:**
-- Which agent
-- What task for that agent
-- What files/paths are relevant
-- What you need from the results to continue your work
+The session scans for the `## Cross-Agent Request` header and parses the **Target** field. It dispatches the target agent, saves the results, and re-dispatches you with a pointer to the results file.
 
-**Do NOT:**
-- Try to use an Agent tool (you don't have it)
-- Write fake dispatch commands
-- Assume the other agent has seen your earlier work (they haven't — fresh dispatch)
+**Rules:**
+- Use the exact header `## Cross-Agent Request` — the session scans for this specific heading
+- The **Target** field must be a valid agent name (lowercase-hyphenated)
+- You may include multiple `## Cross-Agent Request` sections if you need multiple agents, but the session processes them one at a time (first one wins)
+- Do NOT try to use an Agent tool (you don't have it)
+- Do NOT write fake dispatch commands
+- Do NOT assume the other agent has seen your earlier work (they haven't — fresh dispatch)
 
 ## Command Rules — Avoiding Permission Prompts
 
@@ -171,185 +183,27 @@ When working in a TheRock workspace, use this mapping to identify which build co
 
 ## rocm-systems Submodule — Branch Attachment & Divergence Check
 
-TheRock pins `rocm-systems` via a **gitlink** (a specific SHA), not by tracking a branch. After `git submodule update`, `rocm-systems` lands in **detached HEAD** at the pinned SHA. Two failure modes follow if this isn't handled:
+> **Full procedure and branch mapping:** See `skills/workflow/phase-1.5-rocm-systems-alignment.md` for the complete alignment check procedure, branch mapping table, divergence report format, and ALIGNMENT_CHECK output schema.
 
-- **Orphaned commits.** Any commit an agent makes in detached HEAD is reachable only by SHA. The next checkout, submodule update, or branch switch silently abandons it.
-- **Silent divergence.** Switching TheRock branches does NOT move `rocm-systems`. After `git checkout <other-therock-branch>`, the workspace can build against a different effective `rocm-systems` SHA than the user thinks.
-
-### Branch families
-
-| Repo | Branches |
-|------|----------|
-| TheRock | `main`, `release/therock-X.Y` |
-| rocm-systems | `develop`, `release/therock-X.Y`, `release/rocm-rel-X.Y` (legacy — only when explicitly requested) |
-
-### Branch mapping
-
-| TheRock branch | Mapped rocm-systems branch |
-|----------------|---------------------------|
-| `main` | `develop` |
-| `release/therock-X.Y` | `release/therock-X.Y` |
-| Anything else (user/feature branch, fork) | UNKNOWN — ask the user once which family the work derives from, then apply the mapping |
-
-### Trigger condition
-
-Run the alignment check when **either** of these is true:
-
-- `rocm-systems` is in detached HEAD, OR
-- `rocm-systems` is on a branch that is **not** the mapped branch for TheRock's current branch.
-
-If `rocm-systems` is already on the mapped branch — even with local commits ahead of the pinned SHA — the trigger does **not** fire. That is the normal in-flight development state and must not produce a prompt.
-
-### Procedure
-
-Run these commands one at a time and synthesize the comparison in your reasoning. Do **not** capture outputs into shell variables — the Bash tool's command rules forbid `$VAR` expansion.
-
-1. Get TheRock's current branch:
-
-   ```
-   git -C <workspace> branch --show-current
-   ```
-
-2. Get the SHA TheRock pins for `rocm-systems` (via gitlink):
-
-   ```
-   git -C <workspace> rev-parse HEAD:rocm-systems
-   ```
-
-3. Get `rocm-systems`'s current ref (branch name, or empty if detached):
-
-   ```
-   git -C <workspace>/rocm-systems symbolic-ref --short HEAD
-   ```
-
-   If this command exits non-zero, `rocm-systems` is detached.
-
-4. Determine the mapped rocm-systems branch from the table above. For a TheRock branch not in the table, ask the user which family it derives from before continuing.
-
-5. Get the tip of the mapped rocm-systems branch:
-
-   ```
-   git -C <workspace>/rocm-systems fetch origin <mapped-branch>
-   git -C <workspace>/rocm-systems rev-parse origin/<mapped-branch>
-   ```
-
-6. Compare the pinned SHA (step 2) to the mapped branch tip (step 5):
-
-   - **Equal** → silently attach. Run:
-
-     ```
-     git -C <workspace>/rocm-systems checkout <mapped-branch>
-     ```
-
-     Then proceed with the original task.
-
-   - **Different** → STOP. Gather the divergence details and present the report below. Do not proceed.
-
-### Divergence report (when pinned ≠ tip)
-
-Gather the count delta and recent commit subjects:
-
-```
-git -C <workspace>/rocm-systems rev-list --count <pinned-sha>..origin/<mapped-branch>
-git -C <workspace>/rocm-systems rev-list --count origin/<mapped-branch>..<pinned-sha>
-git -C <workspace>/rocm-systems log --oneline -10 <pinned-sha>..origin/<mapped-branch>
-```
-
-Then output a structured report — substitute concrete values, do not use shell expansion in the rendered text:
-
-```
-ROCM-SYSTEMS DIVERGENCE DETECTED
-
-  TheRock branch:        <therock-branch>
-  Expected rocm-systems: <mapped-branch>
-  Pinned SHA:            <pinned-sha>     ← what TheRock builds today
-  Branch tip SHA:        <tip-sha>
-  Commits ahead of pin:  <N>
-  Commits behind pin:    <M>
-
-  Recent commits on <mapped-branch> not yet pinned in TheRock:
-    <hash> <subject>
-    <hash> <subject>
-    ...
-
-  Choose:
-    (a) Use rocm-systems <mapped-branch> tip (<tip-sha>)
-        — likely has fixes not yet bumped into TheRock
-        — agents may commit on this branch
-    (b) Use TheRock's pinned SHA (<pinned-sha>) — detached HEAD
-        — matches what TheRock builds today
-        — READ-ONLY: no commits possible
-```
-
-State the need for a user decision and stop. Do not guess.
-
-### Hard rules
-
-- **Never commit in detached HEAD.** If you are asked to commit and `rocm-systems` is detached, refuse and surface the alignment check (or divergence report). Orphaned commits are a silent data-loss bug.
-- **Re-run the check after any TheRock branch switch** you perform. `git checkout <therock-branch>` does NOT move `rocm-systems` — divergence can appear instantly.
-- **Re-run the check after `git submodule update`** in TheRock. That command lands `rocm-systems` in detached HEAD at the (possibly new) pinned SHA.
+TheRock pins `rocm-systems` via a **gitlink** (a specific SHA). Two failure modes exist: orphaned commits from detached HEAD, and silent SHA divergence when switching TheRock branches.
 
 ### Re-verify rule (defense in depth)
 
 The session runs an alignment pre-flight (Phase 1.5) before dispatching any agent that touches `rocm-systems`. **The pre-flight result is a hint, not a substitute.** Any agent that mutates state (build-expert running builds, git-agent committing/branching, bash-expert specifying scripts that touch the submodule) MUST re-run the verification commands itself before acting.
 
-Why: the pre-flight runs once at workflow start. State can drift between then and the agent's dispatch (a prior agent may have run `git submodule update`, switched a branch, or checked out a different ref). Trusting an upstream "already verified" claim and skipping re-verification is the failure mode that produced orphaned commits in earlier iterations of this pipeline. The alignment-context block included in your dispatch prompt tells you what the session believed at workflow start; your job is to confirm it's still true now.
+Why: the pre-flight runs once at workflow start. State can drift between then and the agent's dispatch. Trusting an upstream "already verified" claim and skipping re-verification is the failure mode that produced orphaned commits in earlier iterations of this pipeline. The alignment-context block included in your dispatch prompt tells you what the session believed at workflow start; your job is to confirm it's still true now.
 
 Read-only agents (troubleshooter, implementer in design-mode, tester) read the alignment-context block and surface awareness of the current alignment state in their outputs but do not need to re-run the commands themselves — they cannot commit and cannot trigger a build.
 
-### Worked example — release branch alignment
+### Hard rules
 
-TheRock workspace is on `release/therock-7.0`. The build-expert is dispatched to verify a HIP runtime change. Its alignment check:
+- **Never commit in detached HEAD.** Orphaned commits are silent data loss.
+- **Re-run the check after any TheRock branch switch.** `git checkout <therock-branch>` does NOT move `rocm-systems`.
+- **Re-run the check after `git submodule update`.** That command lands `rocm-systems` in detached HEAD.
 
-```
-git -C /workspace branch --show-current
-→ release/therock-7.0
+### ALIGNMENT_CHECK output
 
-git -C /workspace rev-parse HEAD:rocm-systems
-→ a1b2c3d...
-
-git -C /workspace/rocm-systems symbolic-ref --short HEAD
-→ (exit 1, detached)
-
-# Mapped branch: release/therock-7.0 → release/therock-7.0
-# (NOT develop — develop is only mapped from main)
-
-git -C /workspace/rocm-systems fetch origin release/therock-7.0
-git -C /workspace/rocm-systems rev-parse origin/release/therock-7.0
-→ a1b2c3d...
-
-# Pinned SHA == tip SHA → ATTACHED_AND_PROCEEDED
-git -C /workspace/rocm-systems checkout release/therock-7.0
-# Then proceed with the build.
-```
-
-If TheRock is on `release/therock-7.0` and rocm-systems gets attached to `develop` by mistake, every subsequent commit lands on the wrong release line. The mapping table in the per-agent definitions exists to prevent exactly that.
-
-### Canonical ALIGNMENT_CHECK output schema
-
-Every agent that touches `rocm-systems` (build-expert, git-agent, bash-expert when specifying scripts, troubleshooter when investigating, implementer in mutation mode, tester when its results depend on the submodule SHA) MUST emit an `ALIGNMENT_CHECK:` line as the first parseable status line in its output. The session parses this line.
-
-Valid values:
-
-| Value | Meaning |
-|-------|---------|
-| `NOT_APPLICABLE` | Operation does not touch `<workspace>/rocm-systems/` (a TheRock-only commit, a query, a bisect tick on TheRock super-project). |
-| `TRIGGER_DID_NOT_FIRE` | `rocm-systems` is on the mapped branch (in-flight state). Proceeded with the requested operation. |
-| `ATTACHED_AND_PROCEEDED` | `rocm-systems` was detached at a SHA equal to the mapped branch tip. Ran the attach-checkout, then proceeded. |
-| `DIVERGENCE_HALTED` | Pinned SHA ≠ mapped branch tip. Output the divergence report and stopped. **Forbidden:** any state-mutating `Operation:` line after this verdict. |
-| `FORK_BRANCH_AMBIGUOUS` | TheRock is on a fork/feature branch with no defined mapping. Listed candidate mapped branches, stopped. **Forbidden:** any state-mutating `Operation:` line after this verdict. |
-
-Skipping this line, or pairing `DIVERGENCE_HALTED`/`FORK_BRANCH_AMBIGUOUS` with a state-mutating `Operation:` (e.g. `Operation: commit`, `Operation: build`, `BUILD_DECISION: BUILD_NOW`), is malformed output.
-
-### Output validator behavior
-
-The session parses each agent's output for the `ALIGNMENT_CHECK:` line and the forbidden-combination rule above. On a malformed result:
-
-1. **First miss:** session re-dispatches the agent with the original prompt plus a correction note: "Your previous output omitted the required `ALIGNMENT_CHECK:` line (or paired a halt verdict with a state-mutating Operation). Re-emit your output following the schema in DISPATCH-PROTOCOL.md."
-2. **Second miss:** same re-dispatch with stronger language.
-3. **Third miss:** session halts the workflow and surfaces the violation to the user. Do not silently swallow systematic violations — they indicate the agent definition or the prompt is broken.
-
-The retry cap is 2 (so the agent is invoked at most 3 times for the same step). This bound exists so a flaky output doesn't hide a real definitional bug.
+Every agent that touches `rocm-systems` MUST emit an `ALIGNMENT_CHECK:` line. Valid values: `NOT_APPLICABLE`, `TRIGGER_DID_NOT_FIRE`, `ATTACHED_AND_PROCEEDED`, `DIVERGENCE_HALTED`, `FORK_BRANCH_AMBIGUOUS`. See the reference file for full schema and forbidden combinations.
 
 ## Thinking Directory Structure
 

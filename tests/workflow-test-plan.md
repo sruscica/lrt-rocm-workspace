@@ -5,7 +5,7 @@ Each test case is a mock prompt dispatched through the pipeline, with expected r
 
 **How to run:** Each test case lists a `/workflow` prompt and expected outcomes. Tests can be run as:
 - **PM-only** (fast): dispatch PM Orchestrator, check JSON routing
-- **Single-hop** (medium): dispatch PM + first specialist, check behavior
+- **Single-hop** (medium): dispatch PM Orchestrator + first specialist, check behavior
 - **Full pipeline** (slow, ~$30-50): run the complete dispatch loop end-to-end
 
 **Test IDs:** `W-{section}{number}` (e.g., W-C1 = Core Workflow #1)
@@ -22,7 +22,7 @@ Each test case is a mock prompt dispatched through the pipeline, with expected r
   - Expected starting agent: `hip-expert`
   - Expected pipeline: hip-expert → planner → implementer → commit → build-expert → tester → reviewer
   - Expected branch: `create-new` (immediate, design task)
-  - Pass criteria: PM returns design/hip-expert, session creates branch immediately
+  - Pass criteria: PM Orchestrator returns design/hip-expert, session creates branch immediately
 
 - [ ] **W-C2**: New test cases for existing API
   - Prompt: `Add hipMemcpyPeer single-GPU test cases to the memory test suite`
@@ -35,13 +35,13 @@ Each test case is a mock prompt dispatched through the pipeline, with expected r
   - Prompt: `Improve the memory management in HIP`
   - Expected classification: `design`
   - Expected starting agent: `hip-expert`
-  - Pass criteria: hip-expert provides analysis but notes the scope is too broad; PM should escalate to user for clarification
+  - Pass criteria: hip-expert provides analysis but notes the scope is too broad; session escalates to user for clarification
 
 - [ ] **W-C4**: Feature that already exists — should exit early
   - Prompt: `Add a thread-safe memory pool to HIP for async allocations`
   - Expected classification: `design`
   - Expected starting agent: `hip-expert`
-  - Pass criteria: hip-expert identifies `hipMallocAsync`/`hipFreeAsync` already exist; PM returns completion (no code changes needed) or escalation to confirm
+  - Pass criteria: hip-expert identifies `hipMallocAsync`/`hipFreeAsync` already exist; session routes to completion (no code changes needed) or escalation to confirm
 
 ### 1.2 Fixing a Failing HIP/OCL Test
 
@@ -168,9 +168,9 @@ Each test case is a mock prompt dispatched through the pipeline, with expected r
 
 - [ ] **W-T1**: Run a specific test suite
   - Prompt: `Run the hipMemcpy test suite and report which tests pass`
-  - Expected classification: `script` (after Step 5b override if PM says bug)
+  - Expected classification: `script` (after Step 5b override if PM Orchestrator says bug)
   - Expected starting agent: `tester`
-  - Pass criteria: PM routes to tester, Step 5b/6 do not override, tester probes environment first
+  - Pass criteria: PM Orchestrator routes to tester, Step 5b/6 do not override, tester probes environment first
   - Permission check: tester uses `printenv`, `test -f`, inline LD_LIBRARY_PATH
 
 - [ ] **W-T2**: Run a specific test category
@@ -261,15 +261,15 @@ Each test case is a mock prompt dispatched through the pipeline, with expected r
 - [ ] **W-G4b**: New task on unrelated existing branch — branch confirmation catches mismatch
   - Setup: workspace checked out on `amd/dev/sruscica/build_rocm_script`
   - Prompt: `Add gh CLI installation to the Docker pipeline`
-  - Expected: (1) PM returns `branch_action: "create-new"` (task is unrelated to current branch), (2) Phase 1 Step 2 confirmation explicitly presents the branch as a choice — showing "Continue on this branch, or create a new one?" when PM suggests `use-existing`, or showing current branch name when PM suggests `create-new`
-  - Pass criteria: the confirmation prompt always makes the branch an explicit, answerable question — not just a label the user can skim past. If PM incorrectly suggests `use-existing`, the session's prompt wording makes the mismatch visible.
+  - Expected: (1) PM Orchestrator returns `branch_action: "create-new"` (task is unrelated to current branch), (2) Phase 1 Step 2 confirmation explicitly presents the branch as a choice — showing "Continue on this branch, or create a new one?" when PM Orchestrator suggests `use-existing`, or showing current branch name when PM Orchestrator suggests `create-new`
+  - Pass criteria: the confirmation prompt always makes the branch an explicit, answerable question — not just a label the user can skim past. If PM Orchestrator incorrectly suggests `use-existing`, the session's prompt wording makes the mismatch visible.
 
 ### 4.2 Commit Workflows
 
 - [ ] **W-G5**: Post-commit sequence fires automatically
   - Prompt: Any design task that reaches the commit step
-  - Expected: after commit → build-expert → tester (mandatory, PM not consulted)
-  - Pass criteria: session dispatches build-expert and tester without asking PM between commit and tester
+  - Expected: after commit → build-expert → tester (mandatory, session routes directly)
+  - Pass criteria: session dispatches build-expert and tester via routing table — no PM Orchestrator dispatch between commit and tester
 
 - [ ] **W-G6**: Deferred branch created at commit time
   - Prompt: Bug task where troubleshooter finds a real bug → planner → implementer → commit
@@ -278,7 +278,7 @@ Each test case is a mock prompt dispatched through the pipeline, with expected r
 
 - [ ] **W-G7**: Commit with correct message format
   - Prompt: Any implementation task
-  - Expected: PM returns `type: "commit"` with structured message (feat/fix prefix, Changes: bullets)
+  - Expected: session constructs commit message (feat/fix prefix, Changes: bullets) from plan + implementer output
   - Pass criteria: git-agent receives well-formed commit message
 
 - [ ] **W-G7a**: Claude signature appended to commit messages and PR body
@@ -296,27 +296,27 @@ Each test case is a mock prompt dispatched through the pipeline, with expected r
 
 - [ ] **W-G8**: Reviewer pass → completion
   - Prompt: Design task where implementation is correct
-  - Expected: reviewer verdict `pass` → PM returns `completion` → verification gate passes
+  - Expected: reviewer verdict `pass` → session routing table routes to Phase 3 (completion) → verification gate passes
   - Pass criteria: verification gate checks builds/, tests/, reviews/ artifacts before completing
 
 - [ ] **W-G9**: Reviewer partial → implementer fix
   - Prompt: Design task where reviewer finds code quality issues (not spec issues)
-  - Expected: reviewer verdict `partial` → PM routes back to implementer with iteration_change: "minor"
+  - Expected: reviewer verdict `partial` → session routes back to implementer with iteration_change: minor
   - Pass criteria: implementer gets reviewer feedback, makes fixes, re-commits, re-builds, re-tests
 
 - [ ] **W-G10**: Reviewer fail-spec → planner rethink
   - Prompt: Design task where implementation doesn't match requirements
-  - Expected: reviewer verdict `fail-spec` → PM routes back to planner with iteration_change: "minor"
+  - Expected: reviewer verdict `fail-spec` → session routes back to planner with iteration_change: minor
   - Pass criteria: planner revises plan based on reviewer feedback
 
 - [ ] **W-G11**: Reviewer fail → hip-expert rethink (major iteration)
   - Prompt: Design task with fundamental approach problems
-  - Expected: reviewer verdict `fail` → PM routes to hip-expert with iteration_change: "major"
+  - Expected: reviewer verdict `fail` → session routes to hip-expert with iteration_change: major
   - Pass criteria: major version increments (1.x → 2.0), hip-expert re-analyzes from scratch
 
 - [ ] **W-G12**: 3-cycle hard cap → escalation
   - Prompt: Design task that keeps failing review
-  - Expected: after 3 major cycles, PM returns `escalation` instead of retrying
+  - Expected: after 3 major cycles, session escalates to user instead of retrying
   - Pass criteria: user presented with status and options (continue/change direction/stop)
 
 ---
@@ -325,52 +325,52 @@ Each test case is a mock prompt dispatched through the pipeline, with expected r
 
 ### 5.1 Classification & Routing
 
-- [ ] **W-E1**: PM misclassifies code change as knowledge → Step 5 overrides
+- [ ] **W-E1**: PM Orchestrator misclassifies code change as knowledge → Step 5 overrides
   - Prompt: `Add a comment documenting hipStreamCreate parameters`
-  - Expected: PM may return `knowledge`; Step 5 overrides to `design` (modifies files)
+  - Expected: PM Orchestrator may return `knowledge`; Step 5 overrides to `design` (modifies files)
   - Pass criteria: classification is `design` after override
 
-- [ ] **W-E2**: PM classifies test run as bug → Step 5b overrides
+- [ ] **W-E2**: PM Orchestrator classifies test run as bug → Step 5b overrides
   - Prompt: `Run the hipMemcpy tests and tell me which pass`
-  - Expected: PM may return `bug` with `tester`; Step 5b overrides classification to `script`
+  - Expected: PM Orchestrator may return `bug` with `tester`; Step 5b overrides classification to `script`
   - Pass criteria: classification is `script`, starting_agent is `tester` after override
 
-- [ ] **W-E3**: PM routes design to planner → Step 6 overrides
+- [ ] **W-E3**: PM Orchestrator routes design to planner → Step 6 overrides
   - Prompt: `Implement a simple helper function for hipStream validation`
-  - Expected: PM may return `planner`; Step 6 overrides to `hip-expert`
+  - Expected: PM Orchestrator may return `planner`; Step 6 overrides to `hip-expert`
   - Pass criteria: starting_agent is `hip-expert` after override
 
-- [ ] **W-E4**: PM modifies workspace path → Step 7 overrides
+- [ ] **W-E4**: PM Orchestrator modifies workspace path → Step 7 overrides
   - Prompt: Any task with explicit workspace `/home/user/workspace`
-  - Expected: PM may return workspace with `/therock` appended; Step 7 uses session's value
+  - Expected: PM Orchestrator may return workspace with `/therock` appended; Step 7 uses session's value
   - Pass criteria: workspace used by session matches Step 1's gathered value
 
-- [ ] **W-E5**: PM returns non-normalized agent name
+- [ ] **W-E5**: PM Orchestrator returns non-normalized agent name
   - Prompt: Any task
-  - Expected: PM returns `"HIP Expert"` or `"Bash Expert"` (capitalized, spaces)
+  - Expected: PM Orchestrator returns `"HIP Expert"` or `"Bash Expert"` (capitalized, spaces)
   - Pass criteria: normalization step converts to `hip-expert`, `bash-expert`
 
-- [ ] **W-E6**: PM returns extra JSON fields
+- [ ] **W-E6**: PM Orchestrator returns extra JSON fields
   - Prompt: Any task
-  - Expected: PM includes `reason`, `rationale`, `expected_pipeline`, etc.
+  - Expected: PM Orchestrator includes `reason`, `rationale`, `expected_pipeline`, etc.
   - Pass criteria: normalization step strips extra fields, only uses defined schema fields
 
 ### 5.2 Incomplete or Conflicting Specifications
 
-- [ ] **W-E7**: Ambiguous task — PM should route normally, specialist should escalate
+- [ ] **W-E7**: Ambiguous task — PM Orchestrator should route normally, specialist should escalate
   - Prompt: `Fix the performance issue`
-  - Expected: PM classifies as `bug`, routes to troubleshooter
-  - Pass criteria: troubleshooter notes insufficient information, states need for escalation in output; PM returns `escalation` asking user for specifics
+  - Expected: PM Orchestrator classifies as `bug`, routes to troubleshooter
+  - Pass criteria: troubleshooter notes insufficient information; session routing table detects no actionable items and escalates to user for specifics
 
 - [ ] **W-E8**: Task outside ROCm domain
   - Prompt: `Write a React component for the test dashboard`
-  - Expected: PM classifies — likely `script` or `design`
-  - Pass criteria: hip-expert or bash-expert notes this is outside ROCm/HIP domain; PM escalates
+  - Expected: PM Orchestrator classifies — likely `script` or `design`
+  - Pass criteria: hip-expert or bash-expert notes this is outside ROCm/HIP domain; session escalates
 
 - [ ] **W-E9**: Contradictory requirements
   - Prompt: `Make hipMalloc both thread-safe and lock-free`
-  - Expected: PM classifies as `design`
-  - Pass criteria: hip-expert identifies the contradiction and explains trade-offs; PM escalates for clarification
+  - Expected: PM Orchestrator classifies as `design`
+  - Pass criteria: hip-expert identifies the contradiction and explains trade-offs; session escalates for clarification
 
 ### 5.3 Build/Test Environment Issues
 
@@ -382,12 +382,12 @@ Each test case is a mock prompt dispatched through the pipeline, with expected r
 - [ ] **W-E11**: Missing ROCm runtime libraries
   - Prompt: Any task requiring test execution, but libamdhip64.so not found
   - Expected: tester's `ldd` check catches missing library
-  - Pass criteria: tester reports `cannot-test` with specific missing library, PM escalates
+  - Pass criteria: tester reports `cannot-test` with specific missing library, session escalates
 
 - [ ] **W-E12**: Build directory doesn't exist yet
   - Prompt: `Run the hip memory tests` in a workspace with no build/ directory
   - Expected: tester discovers no build directory
-  - Pass criteria: tester states need for build-expert in output; PM routes to build-expert via fulfill-request
+  - Pass criteria: tester states need for build-expert in output; session routes to build-expert via cross-agent request detection
 
 - [ ] **W-E13**: Stale build — source changed but not rebuilt
   - Prompt: Test execution task after source modifications
@@ -396,10 +396,10 @@ Each test case is a mock prompt dispatched through the pipeline, with expected r
 
 - [ ] **W-E13b**: Hardware-bound investigation → handoff plan offered
   - Prompt: Bug investigation for a failure reported on a GPU arch the local system doesn't have (e.g. "reproduce ROCM-XXXXX failures reported on MI210" when local GPU is gfx1030)
-  - Expected: troubleshooter cannot reproduce locally and emits `## Hardware Constraint` section in its output. PM returns `escalation`. Session detects the section and ensures the user's options include "Produce a runnable handoff plan I can execute on the remote hardware" (injecting it if PM omitted it).
+  - Expected: troubleshooter cannot reproduce locally and emits `## Hardware Constraint` section in its output. Session routing detects informational verdict and escalates. Session detects the Hardware Constraint section and ensures the user's options include "Produce a runnable handoff plan I can execute on the remote hardware".
   - Pass criteria:
-    - Session presents the handoff option to the user without re-dispatching PM
-    - If user picks the handoff option, bash-expert is dispatched directly (NOT routed through PM)
+    - Session presents the handoff option to the user directly
+    - If user picks the handoff option, bash-expert is dispatched directly (no extra routing step)
     - bash-expert output is saved to `<thinking_dir>/scripts/<iter>-bash-expert-handoff.md`
     - Saved plan contains: target environment, setup checks, reproduction commands using compute-utils runners, diagnostic captures, what-to-send-back checklist
     - troubleshooter report `cannot-test`-style verdicts are NOT used (this is investigation outcome, not post-impl test)
@@ -408,7 +408,7 @@ Each test case is a mock prompt dispatched through the pipeline, with expected r
 
 - [ ] **W-E14**: Cross-agent request — hip-expert needs tester
   - Prompt: Design task where hip-expert says "I need the Tester to run baseline tests before I can finalize"
-  - Expected: PM returns `fulfill-request` with target=tester, then_resume=hip-expert
+  - Expected: session detects cross-agent request, dispatches tester, then re-dispatches hip-expert with results
   - Pass criteria: tester dispatched, results saved, hip-expert re-dispatched with results file path
 
 - [ ] **W-E15**: Agent failure — first failure retries
@@ -418,21 +418,21 @@ Each test case is a mock prompt dispatched through the pipeline, with expected r
 
 - [ ] **W-E16**: Agent failure — second failure on critical agent escalates
   - Prompt: Any task where hip-expert fails twice
-  - Expected: PM returns `escalation` (hip-expert is critical)
+  - Expected: session escalates to user (hip-expert is critical)
   - Pass criteria: user sees the error and is asked how to proceed
 
 - [ ] **W-E17**: Agent failure — second failure on non-critical agent skips
   - Prompt: Any task where note-taker fails twice
-  - Expected: PM returns `next-step` skipping the agent, noting the gap
+  - Expected: session skips the agent, noting the gap in status.md
   - Pass criteria: pipeline continues without the agent's output, gap noted in context
 
 - [ ] **W-E18**: Git Agent failure — immediate stop
   - Prompt: Any commit that fails due to git conflict
   - Expected: session stops immediately, presents error to user
-  - Pass criteria: no retry, no PM consultation — user sees the git error directly
+  - Pass criteria: no retry — user sees the git error directly via session escalation
 
 - [ ] **W-E19**: Reviewer gating check — missing build artifact
-  - Prompt: Design task where PM routes to reviewer but no build results exist
+  - Prompt: Design task where session routes to reviewer but no build results exist
   - Expected: session's reviewer gating check catches missing build
   - Pass criteria: build-expert dispatched before reviewer; reviewer only runs after build+test artifacts exist
 
@@ -458,7 +458,7 @@ Each test case is a mock prompt dispatched through the pipeline, with expected r
 
 - [ ] **W-E19f**: Review feedback routes through pipeline (no direct edits)
   - Prompt: Any task where user provides feedback during Phase 3 Step 2 review (e.g., "move this to a shared function")
-  - Expected: Session does NOT make direct edits. Feedback is sent to PM as a new task, Phase 2 re-entered, implementer makes changes, full post-commit sequence runs again.
+  - Expected: Session does NOT make direct edits. Feedback re-enters Phase 2, implementer makes changes, full post-commit sequence runs again.
   - Pass criteria: no session-level Edit/Write tool calls between user feedback and Phase 2 re-entry; implementer is dispatched for the change
 
 - [ ] **W-E19g**: Branch base confirmation — compute-utils defaults to amd/dev/lrt
@@ -491,10 +491,10 @@ Each test case is a mock prompt dispatched through the pipeline, with expected r
   - Expected: Test classified as `regression-candidate`; Test Status set to `TESTED (regression)`; troubleshooter dispatched same iteration with sub-step `<major>.<minor>-troubleshooter`
   - Pass criteria: git-agent stash/restore both invoked; build-expert invoked twice (rebuild + cleanup rebuild); troubleshooter dispatched in same major iteration
 
-- [ ] **W-E20k**: Phase 2.5 regression path → Phase 2 re-entry includes troubleshooter output in PM dispatch
+- [ ] **W-E20k**: Phase 2.5 regression path → Phase 2 re-entry includes troubleshooter output in routing evaluation
   - Setup: Phase 2.5 triage classifies a wider-suite test as `regression-candidate` and Step 7a dispatches the troubleshooter, which writes its output to `<thinking_dir>/investigations/<major>.<minor>-troubleshooter.md`. Status.md now has `Test Status: TESTED (regression)`, `Build Status: NOT BUILT`. Session re-enters Phase 2.
-  - Expected: The Regression re-entry invariant in Phase 2 fires. The session reads the most recent file from `<thinking_dir>/investigations/`, skips LOOP step 1 (no agent dispatch), and enters the LOOP at step 3 with the troubleshooter output as agent_output sent to PM. Major iteration is NOT incremented. PM routes to planner or implementer.
-  - Pass criteria: PM dispatch on re-entry includes the troubleshooter output as agent_output (not omitted, not replaced with a generic "regression detected" string); no specialist dispatch occurs between Phase 2.5 Step 7a and the PM dispatch; iteration counters carry forward unchanged.
+  - Expected: The Regression re-entry invariant in Phase 2 fires. The session reads the most recent file from `<thinking_dir>/investigations/`, skips LOOP step 1 (no agent dispatch), and enters the LOOP at step 3 with the troubleshooter output as agent_output for routing evaluation. Major iteration is NOT incremented. Session routing table routes to planner or implementer.
+  - Pass criteria: routing evaluation on re-entry includes the troubleshooter output as agent_output (not omitted, not replaced with a generic "regression detected" string); no specialist dispatch occurs between Phase 2.5 Step 7a and the routing evaluation; iteration counters carry forward unchanged.
 
 - [ ] **W-E20d**: Phase 2.5 triage — pre-existing classification
   - Setup: Wider tester returns failing test; triage rerun shows test fails 3/3 without source changes
@@ -508,7 +508,7 @@ Each test case is a mock prompt dispatched through the pipeline, with expected r
 
 - [ ] **W-E20f**: Phase 3 Step 3a.5 — entry skipped when triage file absent or empty
   - Setup: Pipeline completes Phase 2.5 with NO pre-existing failures (or skipped Phase 2.5 entirely); `<thinking_dir>/pre-existing-failures.md` does not exist or has zero data rows
-  - Expected: Step 3a.5 short-circuits — no `gh issue list` calls, no AskUserQuestion prompts; `<known_issues_section>` set to empty string; PR body equals raw PM body unchanged
+  - Expected: Step 3a.5 short-circuits — no `gh issue list` calls, no AskUserQuestion prompts; `<known_issues_section>` set to empty string; PR body equals raw PM Orchestrator body unchanged
   - Pass criteria: no gh CLI calls for issue search/create; no Known Issues heading appears in final PR body
 
 - [ ] **W-E20g**: Phase 3 Step 3a.5 — Live mode + create new issue
@@ -527,33 +527,33 @@ Each test case is a mock prompt dispatched through the pipeline, with expected r
   - Pass criteria: no `gh issue create` call; no draft block; linked-issues table row present with correct issue number
 
 - [ ] **W-E20j**: Phase 3 Step 3a.5 — Mixed categories use batched per-category prompts + duplicate-heading strip
-  - Setup: pre-existing-failures.md has 2 PRE-EXISTING and 1 UNTRIAGED-CANNOT-CLASSIFY failures; PM returned a body that erroneously contains its own `## Known Issues` heading
+  - Setup: pre-existing-failures.md has 2 PRE-EXISTING and 1 UNTRIAGED-CANNOT-CLASSIFY failures; PM Orchestrator returned a body that erroneously contains its own `## Known Issues` heading
   - Expected: Two AskUserQuestion calls (one per non-empty group, multiSelect: true); session strips PM's `## Known Issues` heading and content (up to next `## ` heading) from body before appending session-composed Known Issues section; final PR body contains exactly ONE `## Known Issues Surfaced During This PR` heading
   - Pass criteria: exactly two AskUserQuestion dispatches in step 3a.5; PM's spurious heading removed; final body has single Known Issues section
 
 - [ ] **W-E22**: Phase 3 Step 3a + 3b + body composition — hardware-tested case appends Environment section
   - Setup: hardware_tested=yes, gpu_arch=gfx1100, targeted_arch_used=gfx1100, targeted_summary="15/15 passed on gfx1100", no Phase 2.5 wider run
   - Expected: 3a captures all environment + suite_execution facts; PM 3b prompt receives both blocks; PM body has hardware-test items pre-checked `[x]`; session appends `## Environment` section with GPU arch, project, "Tested on real hardware: yes (arch: gfx1100)" line; final body has exactly ONE `## Environment` heading
-  - Pass criteria: PM prompt contains Environment + Suite execution sections; final body's hardware-test checkboxes are `[x]`; final body contains the appended Environment section; no Known Issues section
+  - Pass criteria: PM Orchestrator prompt contains Environment + Suite execution sections; final body's hardware-test checkboxes are `[x]`; final body contains the appended Environment section; no Known Issues section
 
 - [ ] **W-E22b**: Phase 3 — cannot-test case omits Environment section, leaves hardware boxes unchecked
   - Setup: hardware_tested=cannot-test, targeted_summary="cannot-test: no GPU detected", AMD_GPU_ARCH unset (resolves to "n/a")
   - Expected: PM 3b prompt receives `Hardware tested: cannot-test`; PM body has hardware-test items unchecked `[ ]` and Verification text explicitly states hardware testing did not occur; session does NOT append `## Environment` section
   - Pass criteria: final body's hardware-test checkboxes are `[ ]`; no `## Environment` heading anywhere in final body; Verification mentions hardware testing was not performed
 
-- [ ] **W-E22c**: Phase 3 body composition — strip duplicate Environment heading from PM body
-  - Setup: hardware_tested=yes; PM returned body containing a spurious `## Environment\nfoo bar\n## Verification\n...verification stuff...`
+- [ ] **W-E22c**: Phase 3 body composition — strip duplicate Environment heading from PM Orchestrator body
+  - Setup: hardware_tested=yes; PM Orchestrator returned body containing a spurious `## Environment\nfoo bar\n## Verification\n...verification stuff...`
   - Expected: Session strips PM's `## Environment` section (heading through next `## ` or EOS) before appending session-composed Environment section; `## Verification` content is preserved
   - Pass criteria: final body contains exactly ONE `## Environment` heading; Verification section content survives the strip
 
 - [ ] **W-E22d**: Phase 3 body composition — both Environment and Known Issues append in correct order
   - Setup: hardware_tested=yes AND pre-existing-failures.md has 1 PRE-EXISTING failure that user marks as "Link to existing #4242"
-  - Expected: Final body order is PM body → `## Environment` → `## Known Issues Surfaced During This PR`; each section appears exactly once
-  - Pass criteria: scanning the final body, the `## Environment` heading occurs after the last PM-body `## ` heading and before `## Known Issues Surfaced During This PR`; both sections present exactly once
+  - Expected: Final body order is PM Orchestrator body → `## Environment` → `## Known Issues Surfaced During This PR`; each section appears exactly once
+  - Pass criteria: scanning the final body, the `## Environment` heading occurs after the last PM Orchestrator-body `## ` heading and before `## Known Issues Surfaced During This PR`; both sections present exactly once
 
 - [ ] **W-E22e**: Phase 3 — wider_ran=no leaves wider-suite Test plan items unchecked
-  - Setup: wider_ran=no (no Phase 2.5 wider tester report exists), hardware_tested=yes, targeted_summary="15/15 passed on gfx1100"; PM body Test plan includes a wider-suite verification item
-  - Expected: PM body's wider-suite Test plan items are unchecked `[ ]`; hardware-test items are `[x]`; Environment section appended
+  - Setup: wider_ran=no (no Phase 2.5 wider tester report exists), hardware_tested=yes, targeted_summary="15/15 passed on gfx1100"; PM Orchestrator body Test plan includes a wider-suite verification item
+  - Expected: PM Orchestrator body's wider-suite Test plan items are unchecked `[ ]`; hardware-test items are `[x]`; Environment section appended
   - Pass criteria: final body's wider-suite checkboxes are `[ ]`; final body's hardware-test checkboxes are `[x]`; Environment section present
 
 - [ ] **W-E25**: PR-feedback task language does not bypass Phase 3 gates
@@ -563,13 +563,13 @@ Each test case is a mock prompt dispatched through the pipeline, with expected r
 
 - [ ] **W-E26**: Reviewer pass + minor polish suggestion → session does not edit source
   - Setup: Reviewer agent returns `pass` verdict but mentions a trivial cosmetic suggestion (e.g., "could switch `//!<` trailing markers to `//!` leading markers for consistency"). Reviewer's verdict is APPROVED.
-  - Expected: Session does NOT invoke the Edit tool on any source file. The Reviewer output is sent to PM via LOOP step 3. PM either returns `completion` (treating the polish as optional) or routes to implementer for the polish change. The session never patches source files itself.
-  - Pass criteria: Zero Edit/Write tool calls by the session against workspace source paths between Reviewer return and Phase 3 entry. PM is dispatched after Reviewer return.
+  - Expected: Session does NOT invoke the Edit tool on any source file. The Reviewer output is evaluated via session routing logic (LOOP step 3). Session either routes to Phase 3 (treating the polish as optional) or routes to implementer for the polish change. The session never patches source files itself.
+  - Pass criteria: Zero Edit/Write tool calls by the session against workspace source paths between Reviewer return and Phase 3 entry. Session routing evaluation occurs after Reviewer return.
 
-- [ ] **W-E27**: Reviewer pass → session dispatches PM, not git-agent directly
+- [ ] **W-E27**: Reviewer pass → session routes via routing table, not git-agent directly
   - Setup: Reviewer agent returns `pass`. Code changes have been committed by an earlier git-agent run as part of the iteration; the task involves an existing PR. The session has the option (incorrectly) to interpret "reviewer passed → next is push" and dispatch git-agent directly with both commit and push pre-authorized.
-  - Expected: Session executes LOOP step 3 — sends Reviewer output to PM. PM returns `completion` (or escalation). Only after `completion` does the session enter Phase 3 and present the Step 2 review-offer gate, then the Step 3 push gate. Git-agent for push is dispatched only after the user approves Step 3.
-  - Pass criteria: Trace shows PM dispatch immediately after Reviewer return; git-agent push dispatch (if any) occurs only after AskUserQuestion for Step 3 returned an affirmative answer. No "pre-authorized" language in the git-agent push prompt.
+  - Expected: Session executes LOOP step 3 — evaluates Reviewer output via routing table. Routing table maps `reviewer | pass` → Phase 3 (completion). Only after routing to Phase 3 does the session present the Step 2 review-offer gate, then the Step 3 push gate. Git-agent for push is dispatched only after the user approves Step 3.
+  - Pass criteria: Trace shows session routing evaluation (PM checkpoint task) immediately after Reviewer return — routing table maps `reviewer | pass` → Phase 3. Git-agent push dispatch (if any) occurs only after AskUserQuestion for Step 3 returned an affirmative answer. No "pre-authorized" language in the git-agent push prompt.
 
 ### 5.5 PR Feedback Skill
 
@@ -643,10 +643,10 @@ Each test case is a mock prompt dispatched through the pipeline, with expected r
   - Expected: Both reply attempts complete (first succeeds, second succeeds); first thread resolves; second thread fails. Step 3d writes `pr-feedback-outcome.json` with both records — first showing all `true`, second showing `reply_posted: true, thread_resolved: false, thread_error: "<perm error>"`. Phase 3 Step 1 reads the file and prints the multi-line "PR feedback round trip — partial success" block citing comment 2's failure.
   - Pass criteria: outcome file exists at `<thinking_dir>/pr-feedback-outcome.json` with the documented schema; user-facing summary contains the failure block, not the success one-liner.
 
-- [ ] **W-E20**: Verification gate — PM claims completion but artifacts missing
-  - Prompt: Design task where PM returns `completion` but tests/ directory is empty
+- [ ] **W-E20**: Verification gate — routing table routes to completion but artifacts missing
+  - Prompt: Design task where routing table routes to Phase 3 (completion) but tests/ directory is empty
   - Expected: Phase 3 Step 0 verification fails
-  - Pass criteria: session re-dispatches PM with "Verification gate failed. Missing: test results." — does NOT present completion to user
+  - Pass criteria: session halts completion with "Verification gate failed. Missing: test results." and re-enters Phase 2 — does NOT present completion to user
 
 ### 5.6 Permission Prompt Compliance
 
@@ -679,7 +679,7 @@ Each test case is a mock prompt dispatched through the pipeline, with expected r
 
 - [ ] **W-A2**: Phase 1.5 — TRIGGER_DID_NOT_FIRE path
   - Prompt (paper trace): rocm-systems on `develop`, TheRock on `main`
-  - Expected: `<alignment_status>` = TRIGGER_DID_NOT_FIRE, proceed to Parsing PM Output
+  - Expected: `<alignment_status>` = TRIGGER_DID_NOT_FIRE, proceed to Parsing PM Orchestrator Output
   - Pass criteria: no halt, no checkout, status.md records TRIGGER_DID_NOT_FIRE
 
 - [ ] **W-A3**: Phase 1.5 — ATTACHED_AND_PROCEEDED path
@@ -725,7 +725,7 @@ Each test case is a mock prompt dispatched through the pipeline, with expected r
 - [ ] **W-A11**: Output validator catches forbidden combo (DIVERGENCE_HALTED + BUILD_DECISION)
   - Prompt (paper trace): build-expert returns `ALIGNMENT_CHECK: DIVERGENCE_HALTED` followed by `BUILD_DECISION: BUILT`
   - Expected: session detects forbidden combo, re-dispatches with correction note
-  - Pass criteria: workflow does not advance to PM with this output
+  - Pass criteria: workflow does not advance past alignment validation with this output
 
 - [ ] **W-A12**: Output validator halts after 3 misses
   - Prompt (paper trace): agent fails validation 3 times in a row
@@ -740,7 +740,7 @@ Each test case is a mock prompt dispatched through the pipeline, with expected r
 - [ ] **W-A14**: implementer surfaces plan-vs-release conflict
   - Prompt (agent dispatch): implementer dispatched with plan that uses develop-only API; workspace on `release/therock-7.0`
   - Expected: implementer halts editing, outputs PLAN-VS-RELEASE CONFLICT block
-  - Pass criteria: NO files written; PM re-routing requested
+  - Pass criteria: NO files written; session re-routing requested via structured output
 
 - [ ] **W-A15**: tester records SHA context in test report
   - Prompt (agent dispatch): tester runs HIP unit tests against rocm-systems
@@ -763,7 +763,7 @@ Each test case is a mock prompt dispatched through the pipeline, with expected r
 
 Run tests in this order to catch blocking issues early:
 
-1. **PM routing tests** (W-E1 through W-E6, W-E24) — fast, PM-only dispatches
+1. **PM Orchestrator classification tests** (W-E1 through W-E6, W-E24) — fast, PM Orchestrator-only dispatches
 2. **Permission compliance** (W-E21 through W-E23) — single-hop specialist dispatches
 3. **Core workflow happy paths** (W-C1, W-C5, W-T1, W-G1) — one per classification type
 4. **Branch/commit logic** (W-G1 through W-G7) — verify deferred creation works

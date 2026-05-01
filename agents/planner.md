@@ -111,3 +111,13 @@ Block planning when:
 - You need information you cannot get from your tools (e.g., behavior of an external system, user preference between two materially different approaches).
 
 The PM will route to the named agent or surface the clarification to the user, then re-dispatch you. Do NOT invent steps to fill a thin analysis — that wastes the Implementer's effort and the user's time.
+
+### Plan Status
+**(Mandatory — the session parses this for routing.)**
+
+End your output with exactly one of these lines:
+
+- `PLAN_STATUS: READY` — you produced a complete implementation plan with numbered steps above.
+- `PLAN_STATUS: BLOCKED` — you could not produce a plan (see Planning Blocked section above for the reason).
+
+The session uses this keyword to route deterministically: READY → implementer, BLOCKED → escalation. Without it, the session must infer your plan state from prose, which is unreliable.

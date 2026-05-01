@@ -115,6 +115,16 @@ How the script should be designed — structure, key features, design decisions 
 #### Style Guide for Implementer
 Concrete conventions the implementer must follow (shebang, set flags, section separators, option parsing pattern, color codes, etc.). Include examples from existing scripts.
 
+### Verdict (starting expert role only)
+**(Mandatory when acting as starting expert — the session parses this for routing.)**
+
+End your output with exactly one of these lines:
+
+- `VERDICT: ACTIONABLE` — your analysis produced concrete recommendations that require code/script changes.
+- `VERDICT: INFORMATIONAL` — your analysis is purely informational with no code changes recommended.
+
+The session uses this keyword to route deterministically: ACTIONABLE → planner, INFORMATIONAL → completion. Without it, the session must infer your intent from prose, which is unreliable.
+
 ### When invoked by another agent (implementation support):
 
 #### Task

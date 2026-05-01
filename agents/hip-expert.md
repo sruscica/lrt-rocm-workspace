@@ -88,6 +88,16 @@ The PM uses the literal presence of bullet points under this section as the trig
 
 **Judgment rule:** Use best judgment and avoid escalating too often. If a reasonable default exists, pick it and document the choice in your Recommendations. Only escalate when the decision materially affects the outcome.
 
+### Verdict
+**(Mandatory — the session parses this for routing.)**
+
+End your output with exactly one of these lines:
+
+- `VERDICT: ACTIONABLE` — your analysis produced concrete code-change items in the Actionable Items section above.
+- `VERDICT: INFORMATIONAL` — your analysis is purely informational with no code changes recommended (knowledge question, explanation, or "No actionable items" above).
+
+The session uses this keyword to route deterministically: ACTIONABLE → planner, INFORMATIONAL → completion. Without it, the session must infer your intent from prose, which is unreliable.
+
 ## Baseline Testing
 
 When analyzing changes to existing code, state in your output that baseline testing is needed:

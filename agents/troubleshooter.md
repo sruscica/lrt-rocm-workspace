@@ -150,3 +150,13 @@ Under the header, populate:
 - **Tests / binaries involved** — exact ctest names + binary paths so the same set can be invoked on the remote system without re-deriving them.
 
 Do not produce the runnable handoff plan yourself — the session will offer that to the user as an explicit option after your investigation completes.
+
+### Verdict
+**(Mandatory — the session parses this for routing.)**
+
+End your output with exactly one of these lines:
+
+- `VERDICT: ACTIONABLE` — your investigation identified a root cause with a concrete fix recommendation (code changes needed).
+- `VERDICT: INFORMATIONAL` — your investigation concluded without actionable code changes (issue is environmental, not a bug, or requires hardware not available locally).
+
+The session uses this keyword to route deterministically: ACTIONABLE → planner, INFORMATIONAL → completion or escalation. Without it, the session must infer your intent from prose, which is unreliable.

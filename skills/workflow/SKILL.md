@@ -21,7 +21,57 @@ You (session / PM) ── holds Agent tool, routes agents, tracks progress
   +-> Note-taker (auto-dispatched, no routing approval needed)
 ```
 
-You make routing decisions directly — evaluating agent output and deciding what's next. The PM Orchestrator is only used for initial task classification (Phase 1) and PR content generation (Phase 3). Between agents, YOU are the PM. Agents communicate through files in the thinking directory — never through conversation history.
+You make routing decisions directly — evaluating agent output and deciding what's next via a deterministic routing table (see Session Routing Logic). The PM Orchestrator is only used for initial task classification (Phase 1) and PR content generation (Phase 3). Between agents, YOU are the PM. Agents communicate through files in the thinking directory — never through conversation history.
+
+### Session State Variables
+
+These variables are maintained by the session throughout pipeline execution:
+
+| Variable | Set when | Used by | Description |
+|---|---|---|---|
+| `workspace` | Phase 1 Step 1 | All dispatches | Path to the code repository |
+| `thinking_dir` | Phase 1 Step 3 | All dispatches | `<artifact_base>/thinking/YYYY-MM-DD-<topic_slug>` |
+| `testing_dir` | Phase 1 Step 3 | Tester dispatches | `<artifact_base>/testing/YYYY-MM-DD-<topic_slug>` |
+| `iteration` | Phase 1 (starts at 1.0) | All dispatches | `<major>.<minor>` — major increments on approach change, minor on fix-and-retry |
+| `classification` | Phase 1 Step 1 | Branch timing, expert selection | `design`, `bug`, `script`, or `knowledge` |
+| `branch_action` | Phase 1 Step 2 | Phase 1 Step 4 | `use-existing` or `create-new` |
+| `branch_base` | Phase 1 Step 4a | Branch creation, PR targeting | e.g., `amd/dev/lrt`, `develop`, `main` |
+| `branch_created` | Phase 1 Step 4b | Deferred branch creation | `true` or `false` |
+| `pipeline_start_commit` | Phase 1 Step 5 | Phase 3 review scope | SHA before any pipeline changes |
+| `is_therock_workspace` | Phase 1.5 | Alignment context in dispatches | Whether rocm-systems submodule exists |
+| `alignment_status` | Phase 1.5 | Alignment context in dispatches | `NOT_APPLICABLE`, `TRIGGER_DID_NOT_FIRE`, `ATTACHED_AND_PROCEEDED`, etc. |
+| `gh_token` | Phase 1 Step 1 | Phase 3 push/PR | GitHub token for repo access (may be empty) |
+| `fulfill_request_streak` | Phase 2 loop | Cross-agent request cap | Consecutive cross-agent requests (cap at 3) |
+
+### Build Status State Machine
+
+The session tracks Build Status in `status.md`. Transitions:
+
+```
+                          ┌─────────────────────┐
+                          │     NOT BUILT        │ ← initial state
+                          │                      │ ← reset on reviewer rejection
+                          └──────────┬───────────┘
+                                     │ post-commit: build-expert runs
+                          ┌──────────┴───────────┐
+                     ┌────┤   BUILD_DECISION?     ├────┐
+                     │    └──────────────────────-─┘    │
+                     ▼                                  ▼
+          ┌──────────────────┐               ┌─────────────────┐
+          │  BUILD DEFERRED  │               │      BUILT      │
+          │  (non-functional)│               │  (build passed) │
+          └────────┬─────────┘               └─────────────────┘
+                   │ reviewer passes,                  ▲
+                   │ session dispatches                │
+                   │ build-expert (actual build)       │
+                   └───────────────────────────────────┘
+                                              ┌─────────────────┐
+                                              │  BUILD FAILED   │
+                                              │ → implementer   │
+                                              └─────────────────┘
+```
+
+Build Status and Test Status both reset to their initial values on reviewer rejection.
 
 ## Session Invariants
 
@@ -72,139 +122,14 @@ Phase 3 Step 2 (review offer) and Step 3 (push confirmation) are MANDATORY user 
 
 ## Progress Tracking
 
-The session uses `TaskCreate` and `TaskUpdate` to maintain a visible progress checklist throughout pipeline execution. This gives the user real-time visibility into which stage is active, what's coming next, and when the pipeline loops.
+> **Full details:** See Appendix A at the end of this file for task templates, sub-tasks, and iteration loop handling.
 
-### Initial Task List
-
-Create the initial task list after Phase 1 Step 2 (user confirms task). The list is based on the classification and starting_agent.
-
-**script / design tasks:**
-
-```
-TaskCreate: subject="Analyze codebase"          activeForm="Analyzing codebase..."
-TaskCreate: subject="Create implementation plan" activeForm="Creating plan..."
-TaskCreate: subject="Implement changes"          activeForm="Implementing changes..."
-TaskCreate: subject="Commit changes"             activeForm="Committing..."
-TaskCreate: subject="Verify build"               activeForm="Verifying build..."
-TaskCreate: subject="Run tests"                  activeForm="Running tests..."
-TaskCreate: subject="Review changes"             activeForm="Reviewing..."
-TaskCreate: subject="Push and create PR"         activeForm="Pushing..."
-```
-
-If `starting_agent` is `planner` (expert analysis not needed): omit "Analyze codebase."
-
-**bug tasks:**
-
-```
-TaskCreate: subject="Investigate issue"          activeForm="Investigating..."
-TaskCreate: subject="Create fix plan"            activeForm="Creating fix plan..."
-TaskCreate: subject="Implement fix"              activeForm="Implementing fix..."
-(remaining same as script from "Commit changes" onward)
-```
-
-**knowledge tasks:**
-
-```
-TaskCreate: subject="Research question"          activeForm="Researching..."
-```
-
-### PM Checkpoint Tasks
-
-After each agent completes, create a PM checkpoint task to make the routing evaluation visible:
-
-```
-TaskCreate: subject="PM: Evaluate <agent> results"  activeForm="PM evaluating..."
-```
-
-Mark it `in_progress` immediately, evaluate the agent's output using the Session Routing Logic, then mark it `completed`. This makes the PM's presence visible in the checklist — the user sees the PM "checking in" between agents.
-
-### Sub-Tasks
-
-Sub-tasks are created when a parent task transitions to `in_progress`. Use the parent name as a prefix for visual hierarchy.
-
-**Reviewer sub-tasks** (created when "Review changes" becomes `in_progress`):
-
-```
-TaskCreate: subject="Review: Check plan compliance"  activeForm="Checking plan compliance..."
-TaskCreate: subject="Review: Verify build results"   activeForm="Verifying build results..."
-TaskCreate: subject="Review: Verify test results"    activeForm="Verifying test results..."
-TaskCreate: subject="Review: Assess code quality"    activeForm="Assessing code quality..."
-```
-
-When the reviewer requests consultation (detected in its output):
-```
-TaskCreate: subject="Review: Consult <expert>"       activeForm="Consulting <expert>..."
-```
-
-All non-consultation sub-tasks are marked `completed` when the reviewer returns its initial output. Consultation sub-tasks are marked `completed` when the consultation agent returns. After the reviewer is re-dispatched with consultation results and returns its final verdict, any remaining sub-tasks are marked `completed`.
-
-**Implementer sub-tasks** (created when "Implement changes" becomes `in_progress`):
-
-Read the plan from `<thinking_dir>/plans/` and create one sub-task per step:
-```
-TaskCreate: subject="Implement: Step N — <short title>"  activeForm="Implementing step N..."
-```
-
-Mark each sub-task `completed` when the implementer's output shows the corresponding checkbox ticked (`- [x]`).
-
-**Tester sub-tasks** (created when "Run tests" becomes `in_progress`):
-
-```
-TaskCreate: subject="Test: Probe environment"   activeForm="Probing environment..."
-TaskCreate: subject="Test: Run test suite"       activeForm="Running tests..."
-TaskCreate: subject="Test: Evaluate results"     activeForm="Evaluating results..."
-```
-
-All marked `completed` when the tester returns.
-
-### Iteration Loop Handling
-
-When the reviewer rejects and routing loops back:
-
-1. Mark "Review changes" as `completed` (it completed — with a reject verdict)
-2. Mark all reviewer sub-tasks as `completed`
-3. Create new tasks for the next iteration:
-
-   **reviewer verdict `partial`** (quality issues → implementer):
-   ```
-   TaskCreate: subject="Re-implement (iteration N)"  activeForm="Re-implementing..."
-   TaskCreate: subject="Commit (iteration N)"        activeForm="Committing..."
-   TaskCreate: subject="Verify build (iteration N)"  activeForm="Verifying build..."
-   TaskCreate: subject="Run tests (iteration N)"     activeForm="Running tests..."
-   TaskCreate: subject="Re-review (iteration N)"     activeForm="Re-reviewing..."
-   ```
-
-   **reviewer verdict `fail-spec`** (spec issues → planner):
-   ```
-   TaskCreate: subject="Re-plan (iteration N)"       activeForm="Re-planning..."
-   (plus re-implement, commit, verify build, run tests, re-review)
-   ```
-
-   **reviewer verdict `fail`** (approach wrong → expert):
-   ```
-   TaskCreate: subject="Re-analyze (iteration N)"    activeForm="Re-analyzing..."
-   (plus re-plan, re-implement, commit, verify build, run tests, re-review)
-   ```
-
-The old completed tasks remain visible, showing the full loop history.
-
-### Phase 3 Tasks
-
-When entering Phase 3, create sub-tasks under "Push and create PR":
-
-```
-TaskCreate: subject="Push: Independent verification"  activeForm="Verifying..."
-TaskCreate: subject="Push: User review"               activeForm="Awaiting review..."
-TaskCreate: subject="Push: Create PR"                  activeForm="Creating PR..."
-```
-
-### Update Rules Summary
-
-1. **Before dispatching an agent**: `TaskUpdate` the corresponding task → `in_progress`
-2. **After agent returns**: `TaskUpdate` → `completed`
-3. **PM checkpoint**: Create "PM: Evaluate..." task → `in_progress` → evaluate → `completed`
-4. **Unexpected routing**: If the routing table leads to an agent not in the current checklist, `TaskCreate` a new task for it
-5. **Fulfill-request**: `TaskCreate` a sub-task "Consult: <agent> for <purpose>" under the requesting agent's task
+The session uses `TaskCreate`/`TaskUpdate` to maintain a visible progress checklist. Key rules:
+1. Create the initial task list after user confirms (Phase 1 Step 2), based on classification
+2. Create a "PM: Evaluate <agent> results" checkpoint task between every agent dispatch
+3. Create sub-tasks when parent tasks start (Reviewer: 4 sub-tasks, Implementer: per-plan-step, Tester: 3 sub-tasks)
+4. On iteration loops (reviewer reject), mark old tasks completed and create new iteration tasks
+5. Before dispatching an agent: mark its task `in_progress`. After it returns: mark `completed`.
 
 ## Dispatch Loop
 
@@ -395,151 +320,16 @@ Store this value for use in Phase 3 (review scope selection).
 
 ### Phase 1.5: rocm-systems Alignment Pre-Flight
 
-**Why this phase exists.** TheRock pins `rocm-systems` via gitlink (a specific SHA). After `git submodule update`, `rocm-systems` lands in detached HEAD. Any commit an agent makes in detached HEAD is silently abandoned the next time the submodule moves. Switching TheRock branches does NOT move `rocm-systems`, so the workspace can build against a different effective SHA than the user thinks. Phase 1.5 catches both failure modes before any agent runs.
+> **Full procedure:** See `phase-1.5-rocm-systems-alignment.md` for the complete step-by-step procedure.
 
-This pre-flight is structural (session-enforced), not advisory. The PM does NOT decide whether to run it. The session runs it on every workflow invocation in a TheRock workspace.
+This pre-flight catches two failure modes in TheRock workspaces: orphaned commits from detached HEAD and silent SHA divergence. It is structural (session-enforced) — the session runs it on every workflow invocation where `rocm-systems` exists.
 
-**Step 1.5.1: Detect TheRock workspace**
-
-```
-IF <workspace>/rocm-systems/.git exists OR <workspace>/.gitmodules contains "rocm-systems":
-  Set <is_therock_workspace> = true
-ELSE:
-  Set <is_therock_workspace> = false
-  Set <alignment_status> = NOT_APPLICABLE
-  Skip to Parsing PM Output.
-```
-
-**Step 1.5.2: Run alignment check (TheRock workspace only)**
-
-Run these commands one at a time. Do NOT capture into shell variables — the command rules forbid `$VAR` expansion.
-
-```
-1. git -C <workspace> branch --show-current
-   → <therock_branch>
-
-2. git -C <workspace> rev-parse HEAD:rocm-systems
-   → <pinned_sha>
-
-3. git -C <workspace>/rocm-systems symbolic-ref --short HEAD
-   → <rocm_systems_branch> (or non-zero exit if detached)
-
-4. Determine <mapped_branch> from the table:
-   | TheRock branch         | Mapped rocm-systems branch |
-   |------------------------|---------------------------|
-   | main                   | develop                    |
-   | release/therock-X.Y    | release/therock-X.Y        |
-   | (anything else)        | UNKNOWN — ASK USER         |
-
-   If <therock_branch> matches "release/therock-*", the mapped branch is the
-   SAME release/therock-* string in rocm-systems. Do NOT collapse to develop.
-
-5. IF <mapped_branch> is UNKNOWN:
-     Set <alignment_status> = FORK_BRANCH_AMBIGUOUS
-     Skip to Step 1.5.3.
-
-6. git -C <workspace>/rocm-systems fetch origin <mapped_branch>
-   git -C <workspace>/rocm-systems rev-parse origin/<mapped_branch>
-   → <tip_sha>
-
-7. Determine status by comparing pinned to tip and current ref:
-   - <rocm_systems_branch> == <mapped_branch>:
-       → <alignment_status> = TRIGGER_DID_NOT_FIRE (in-flight state)
-   - detached AND <pinned_sha> == <tip_sha>:
-       git -C <workspace>/rocm-systems checkout <mapped_branch>
-       → <alignment_status> = ATTACHED_AND_PROCEEDED
-   - detached AND <pinned_sha> != <tip_sha>:
-       → <alignment_status> = DIVERGENCE_HALTED
-   - on a branch != <mapped_branch>:
-       → <alignment_status> = DIVERGENCE_HALTED
-       (the user is on an unexpected branch — surface it, do not auto-attach)
-```
-
-**Step 1.5.3: Handle the result**
-
-| `<alignment_status>` | Session action |
-|----------------------|----------------|
-| `TRIGGER_DID_NOT_FIRE` | Proceed to Parsing PM Output. Record status in status.md. |
-| `ATTACHED_AND_PROCEEDED` | Proceed to Parsing PM Output. Record status in status.md. |
-| `DIVERGENCE_HALTED` | Build the divergence report (below) and present to user. Halt. Do NOT dispatch any agent. |
-| `FORK_BRANCH_AMBIGUOUS` | Ask the user which mapped branch the fork derives from. Halt. Do NOT dispatch any agent. |
-
-**Divergence report (when `DIVERGENCE_HALTED`):**
-
-Gather:
-```
-git -C <workspace>/rocm-systems rev-list --count <pinned_sha>..origin/<mapped_branch>
-git -C <workspace>/rocm-systems rev-list --count origin/<mapped_branch>..<pinned_sha>
-git -C <workspace>/rocm-systems log --oneline -10 <pinned_sha>..origin/<mapped_branch>
-```
-
-Present:
-```
-ROCM-SYSTEMS DIVERGENCE DETECTED
-
-  TheRock branch:        <therock_branch>
-  Expected rocm-systems: <mapped_branch>
-  Pinned SHA:            <pinned_sha>     ← what TheRock builds today
-  Branch tip SHA:        <tip_sha>
-  Commits ahead of pin:  <N>
-  Commits behind pin:    <M>
-
-  Recent commits on <mapped_branch> not yet pinned in TheRock:
-    <hash> <subject>
-    ...
-
-  Choose:
-    (a) Use rocm-systems <mapped_branch> tip (<tip_sha>) — likely has fixes not yet bumped into TheRock; agents may commit on this branch
-    (b) Use TheRock's pinned SHA (<pinned_sha>) — detached HEAD; READ-ONLY, no commits possible
-    (c) Cancel workflow
-```
-
-On user response (a): `git -C <workspace>/rocm-systems checkout <mapped_branch> && git -C <workspace>/rocm-systems reset --hard origin/<mapped_branch>`. Re-run Phase 1.5 from Step 1.5.2 to confirm. Update `<alignment_status>`.
-
-On user response (b): leave detached HEAD. Set `<alignment_status>` = `READ_ONLY_PINNED`. Mark the workflow as commit-restricted: any subsequent agent that attempts to commit in `rocm-systems` MUST be halted by the session (see Step 1.5.4).
-
-On user response (c): exit the workflow.
-
-**Step 1.5.4: Record alignment status in status.md**
-
-Dispatch note-taker to add (or update) the `Submodule Alignment Status` field:
-
-```
-Agent(subagent_type: "note-taker", prompt: """
-Update <thinking_dir>/status.md to set:
-  Submodule Alignment Status: <alignment_status>
-  Submodule TheRock Branch: <therock_branch>
-  Submodule Mapped Branch: <mapped_branch_or_NA>
-  Submodule Pinned SHA: <pinned_sha_or_NA>
-  Submodule Tip SHA: <tip_sha_or_NA>
-
-If these fields don't exist in status.md yet, add them in the Pipeline Metadata section.
-""")
-```
-
-This is the source of truth that downstream agents read. Per the re-verify rule (DISPATCH-PROTOCOL.md), it is a HINT — agents that mutate state MUST re-run the verification commands.
-
-**Step 1.5.5: Read-only pinned mode enforcement (when `<alignment_status>` = `READ_ONLY_PINNED`)**
-
-When the user chose option (b), the session enters commit-restricted mode for `rocm-systems`. Before dispatching git-agent for a commit, the session checks the files staged. If any path begins with `rocm-systems/`, the session halts with:
-
-```
-COMMIT BLOCKED — READ-ONLY PINNED SHA MODE
-
-You chose to operate at TheRock's pinned rocm-systems SHA (<pinned_sha>),
-which means rocm-systems is in detached HEAD and commits would be orphaned.
-
-The following staged paths cannot be committed:
-  <path1>
-  <path2>
-
-Choose:
-  (a) Discard the staged rocm-systems changes
-  (b) Restart the workflow and pick option (a) at the divergence prompt
-      (rocm-systems <mapped_branch> tip)
-```
-
-This enforcement runs in the Mandatory Post-Commit Sequence, BEFORE git-agent dispatch.
+**Quick reference — the session executes Steps 1.5.1 through 1.5.5 from the reference file:**
+1. Detect TheRock workspace (check for `rocm-systems/.git`)
+2. Run alignment check (7-step command sequence → produces `<alignment_status>`)
+3. Handle result (proceed, halt with divergence report, or ask user for branch mapping)
+4. Record alignment status in status.md via note-taker
+5. Enforce read-only pinned mode if user chose option (b) at divergence prompt
 
 ### Parsing PM Output — JSON Normalization
 
@@ -795,13 +585,27 @@ This context is a HINT. State can drift between pre-flight and your dispatch.
   your output but you do not need to re-verify. Note any inconsistency you observe
   between the verdict and what you see.
 
-<task-specific context: for the starting agent, use PM's starting_context field.
-For subsequent agents, build context from the previous agent's output and
-relevant thinking_dir files.>
+<task-specific context — use the table below to determine what to include:>
 
-<if this is a re-dispatch after a cross-agent request:>
-Results from <target_agent> are at: <results_file_path>
-Continue your work incorporating those results.
+**Per-transition context rules:**
+
+| Transition | Context to include |
+|---|---|
+| Phase 1 → starting expert | PM's `starting_context` field verbatim |
+| expert → planner | "Analysis is at: `<thinking_dir>/analysis/<N>-<expert>.md`" + one-line summary of actionable items |
+| planner → implementer | "Plan is at: `<thinking_dir>/plans/<N>-planner.md`" + list of files to modify from plan |
+| implementer (partial) → implementer | "Continue from where you left off. Plan is at: `<thinking_dir>/plans/<N>-planner.md`. Check which steps are already marked complete." |
+| build-expert (failed) → implementer | "Build failed. Build log is at: `<thinking_dir>/builds/<N>-build-expert.md`. Fix the build errors and re-run the failed steps." + paste the error summary from build-expert output |
+| tester (fail) → implementer | "Tests failed. Test results are at: `<thinking_dir>/tests/<N>-tester.md`. Fix the failing tests." + paste the failure summary from tester output |
+| reviewer (partial) → implementer | "Reviewer found quality issues. Review is at: `<thinking_dir>/reviews/<N>-reviewer.md`. Address the issues listed." + paste the reviewer's issue list |
+| reviewer (fail-spec) → planner | "Reviewer rejected: implementation doesn't match spec. Review is at: `<thinking_dir>/reviews/<N>-reviewer.md`. Revise the plan." + paste the reviewer's rejection reasons |
+| reviewer (fail) → expert | "Reviewer rejected the approach. Review is at: `<thinking_dir>/reviews/<N>-reviewer.md`. Re-analyze." + paste the reviewer's rejection reasons |
+| implementer → git-agent (commit) | Constructed commit message (see Commit message construction below) + list of files to stage |
+| build-expert (passed) → tester | "Build passed. Build log is at: `<thinking_dir>/builds/<N>-build-expert.md`." + list of test targets from the plan's verification step |
+| build-expert (deferred) → reviewer | "Build deferred (non-functional change). Build analysis is at: `<thinking_dir>/builds/<N>-build-expert.md`." |
+| tester (pass/cannot-test) → reviewer | "Tests passed (or cannot-test). Test results are at: `<thinking_dir>/tests/<N>-tester.md`." |
+| cross-agent request → target agent | The requesting agent's `## Cross-Agent Request` block verbatim |
+| cross-agent fulfill → requesting agent | "Results from `<target_agent>` are at: `<results_file_path>`. Continue your work incorporating those results." |
 """)
 ```
 
@@ -871,10 +675,12 @@ Scan the agent's output for these patterns to determine the output signal:
 
 | Agent | Signal | Detection |
 |-------|--------|-----------|
-| expert (hip-expert, bash-expert, troubleshooter) | actionable items | Output contains a recommendations/approach section with concrete changes to make |
-| expert | no actionable items | Output is purely informational with no code changes recommended |
-| planner | plan produced | Output contains numbered steps with file paths and acceptance criteria |
-| planner | planning blocked | Output states it cannot produce a plan (missing info, unclear scope) |
+| expert (hip-expert, bash-expert, troubleshooter) | actionable items | Output contains `VERDICT: ACTIONABLE` |
+| expert | no actionable items | Output contains `VERDICT: INFORMATIONAL` |
+| expert | (fallback if no VERDICT line) | Scan for recommendations section with concrete changes — treat as actionable if present, informational if absent |
+| planner | plan produced | Output contains `PLAN_STATUS: READY` |
+| planner | planning blocked | Output contains `PLAN_STATUS: BLOCKED` |
+| planner | (fallback if no PLAN_STATUS line) | Scan for numbered steps with file paths — treat as ready if present, blocked if absent |
 | implementer | all steps done | All plan step checkboxes are ticked (`- [x]`), or output states "all steps complete" |
 | git-agent (commit) | success | Output contains a commit hash (`Commit hash: <sha>` or similar) |
 | git-agent (commit) | failure | Output reports git error, merge conflict, or hook failure |
@@ -891,13 +697,17 @@ Scan the agent's output for these patterns to determine the output signal:
 
 **Cross-Agent Request Detection:**
 
-Scan the agent's output for phrases like:
-- "I need the **<Agent>** to..."
-- "This requires **<Agent>** analysis"
-- "Request: dispatch **<Agent>** for..."
-- "The **<Agent>** should review..."
+Scan the agent's output for the structured cross-agent request format:
 
-If detected, treat as a `fulfill-request` route. Track `fulfill_request_streak` — if it would exceed 3 consecutive cross-agent requests, escalate to the user (see streak cap in Phase 2 loop body).
+1. **Primary detection:** Look for a `## Cross-Agent Request` header. If found, parse the `**Target:**` field for the agent name. This is the structured format agents are instructed to use (see DISPATCH-PROTOCOL.md).
+
+2. **Fallback detection:** If no `## Cross-Agent Request` header is found, scan for legacy patterns:
+   - "I need the **<Agent>** to..."
+   - "This requires **<Agent>** analysis"
+   - "Request: dispatch **<Agent>** for..."
+   - "The **<Agent>** should review..."
+
+If either detection fires, treat as a `fulfill-request` route. Track `fulfill_request_streak` — if it would exceed 3 consecutive cross-agent requests, escalate to the user (see streak cap in Phase 2 loop body).
 
 **Routing Table:**
 
@@ -911,6 +721,7 @@ If detected, treat as a `fulfill-request` route. Track `fulfill_request_streak` 
 | planner | plan produced | → implementer | none |
 | planner | planning blocked | → escalation (ask user) | none |
 | implementer | all steps done | → commit (dispatch git-agent) | none |
+| implementer | partial (not all steps done) | → re-dispatch implementer with "Continue from where you left off" | none |
 | implementer | cross-agent request | → fulfill target agent | none |
 | git-agent (commit) | success | → post-commit sequence | none |
 | git-agent (commit) | failure | → escalation (ask user) | none |
@@ -1123,77 +934,9 @@ No PM validation per bisect step — the inner loop is mechanical.
 
 ### Hardware Handoff Dispatch
 
-Triggered from the escalation handler when the user picks the
-"Produce a runnable handoff plan" option after a `## Hardware Constraint`
-investigation. Goal: produce a self-contained plan the user can execute on
-the remote hardware (or hand to someone who has access) without re-deriving
-test names, env vars, binaries, or expected observations.
+> **Full dispatch template:** See Appendix B at the end of this file.
 
-```
-Agent(subagent_type: "bash-expert", prompt: """
-You are the Bash Expert in the ROCm Agent Pipeline.
-You do NOT have the Agent tool.
-
-COMMAND RULES (mandatory):
-- NEVER use `cd /path && git ...` → use `git -C /path ...`
-- NEVER use `echo "$VAR"` or `printf ... "$VAR"` → use `printenv VAR`
-- NEVER use brace expansion `{a,b,c}` → spell out each argument
-- NEVER use `$VAR` or `$?` in any command → use `printenv VAR` or `cmd || echo FAILED`
-
-Workspace: <workspace>
-Thinking directory: <thinking_dir>
-Iteration: <iteration>
-
-Task: Produce a HARDWARE HANDOFF PLAN for executing a hardware-blocked
-investigation on a remote system. The investigation could not conclude
-locally because of a hardware/configuration constraint.
-
-Read the troubleshooter investigation first:
-  <thinking_dir>/investigations/<latest>-troubleshooter*.md
-Pay special attention to its `## Hardware Constraint` section — that's
-your primary input.
-
-Also read (for canonical test runner usage):
-  <plugin_root>/agents/tester.md  (§compute-utils Test Runners)
-
-Produce a single markdown document with these sections, in this order:
-
-1. **Target Environment** — exactly what hardware/config the operator must
-   provide (GPU arch, driver mode, XNACK setting, GPU count, OS where it
-   matters). Pull from the troubleshooter's "What's missing locally".
-2. **Setup Checks** — copy-pasteable commands the operator runs FIRST to
-   confirm the target system actually meets the requirements
-   (`rocminfo | grep -E 'gfx|xnack'`, `nvidia-smi`-equivalent, env probes).
-   Each check shows expected output.
-3. **Reproduction Commands** — for every test/binary listed in the
-   troubleshooter's "Tests / binaries involved", produce the exact runner
-   invocation. Prefer `compute-utils/scripts/hip_test/run_hip_unit_test.sh`
-   etc. (see tester.md). For each, show: full command, expected exit code,
-   how to capture output (`-o <file>`), and what a "matches the reported
-   bug" outcome looks like vs "does not reproduce".
-4. **Diagnostic Captures** — for the SEGFAULT / hang / undefined-behavior
-   cases the troubleshooter flagged, the rocgdb / coredump / dmesg /
-   strace incantations needed. These ARE the cases manual invocation is
-   appropriate for — make that explicit.
-5. **What to Send Back** — a numbered checklist of artifacts the operator
-   should return (full Catch2 console+success output per test, stack
-   traces, dmesg snippets, the env they ran under). The pipeline will
-   resume from these.
-6. **Local-vs-Remote Divergence Notes** — restate, briefly, why local
-   results were not authoritative, so a reader who only sees this plan
-   understands why running it remotely is necessary.
-
-Write the plan to:
-  <thinking_dir>/scripts/<iteration>-bash-expert-handoff.md
-
-Keep the plan executable — operator should be able to copy commands
-verbatim. Do NOT include `$VAR` expansions in any command in the plan;
-use the same expansion-safe forms as the rules above.
-""")
-```
-
-The session does NOT route this output through the PM. It saves the
-result, tells the user where to find it, and asks for direction.
+Triggered when the user picks "Produce a runnable handoff plan" after a `## Hardware Constraint` investigation. Dispatches bash-expert to produce a self-contained plan for remote hardware execution. The session does NOT route this output through the routing table — it saves the result, tells the user where to find it, and asks for direction.
 
 ### Loop Control
 
@@ -1640,3 +1383,190 @@ session having to rediscover the correct account.
 | Bug investigations needing multiple agents | Standalone design discussions |
 | Multi-step work: think → plan → implement → review | Tasks outside ROCm/HIP domain |
 | Script/automation work in ROCm context | Simple file edits |
+
+---
+
+## Appendix A: Progress Tracking Details
+
+### Initial Task List
+
+Create the initial task list after Phase 1 Step 2 (user confirms task). The list is based on the classification and starting_agent.
+
+**script / design tasks:**
+
+```
+TaskCreate: subject="Analyze codebase"          activeForm="Analyzing codebase..."
+TaskCreate: subject="Create implementation plan" activeForm="Creating plan..."
+TaskCreate: subject="Implement changes"          activeForm="Implementing changes..."
+TaskCreate: subject="Commit changes"             activeForm="Committing..."
+TaskCreate: subject="Verify build"               activeForm="Verifying build..."
+TaskCreate: subject="Run tests"                  activeForm="Running tests..."
+TaskCreate: subject="Review changes"             activeForm="Reviewing..."
+TaskCreate: subject="Push and create PR"         activeForm="Pushing..."
+```
+
+If `starting_agent` is `planner` (expert analysis not needed): omit "Analyze codebase."
+
+**bug tasks:**
+
+```
+TaskCreate: subject="Investigate issue"          activeForm="Investigating..."
+TaskCreate: subject="Create fix plan"            activeForm="Creating fix plan..."
+TaskCreate: subject="Implement fix"              activeForm="Implementing fix..."
+(remaining same as script from "Commit changes" onward)
+```
+
+**knowledge tasks:**
+
+```
+TaskCreate: subject="Research question"          activeForm="Researching..."
+```
+
+### PM Checkpoint Tasks
+
+After each agent completes, create a PM checkpoint task to make the routing evaluation visible:
+
+```
+TaskCreate: subject="PM: Evaluate <agent> results"  activeForm="PM evaluating..."
+```
+
+Mark it `in_progress` immediately, evaluate the agent's output using the Session Routing Logic, then mark it `completed`.
+
+### Sub-Tasks
+
+Sub-tasks are created when a parent task transitions to `in_progress`.
+
+**Reviewer sub-tasks** (created when "Review changes" becomes `in_progress`):
+
+```
+TaskCreate: subject="Review: Check plan compliance"  activeForm="Checking plan compliance..."
+TaskCreate: subject="Review: Verify build results"   activeForm="Verifying build results..."
+TaskCreate: subject="Review: Verify test results"    activeForm="Verifying test results..."
+TaskCreate: subject="Review: Assess code quality"    activeForm="Assessing code quality..."
+```
+
+When the reviewer requests consultation:
+```
+TaskCreate: subject="Review: Consult <expert>"       activeForm="Consulting <expert>..."
+```
+
+**Implementer sub-tasks** (created when "Implement changes" becomes `in_progress`):
+
+Read the plan from `<thinking_dir>/plans/` and create one sub-task per step:
+```
+TaskCreate: subject="Implement: Step N — <short title>"  activeForm="Implementing step N..."
+```
+
+Mark each sub-task `completed` when the implementer's output shows the corresponding checkbox ticked (`- [x]`).
+
+**Tester sub-tasks** (created when "Run tests" becomes `in_progress`):
+
+```
+TaskCreate: subject="Test: Probe environment"   activeForm="Probing environment..."
+TaskCreate: subject="Test: Run test suite"       activeForm="Running tests..."
+TaskCreate: subject="Test: Evaluate results"     activeForm="Evaluating results..."
+```
+
+### Iteration Loop Handling
+
+When the reviewer rejects and routing loops back:
+
+1. Mark "Review changes" as `completed` (it completed — with a reject verdict)
+2. Mark all reviewer sub-tasks as `completed`
+3. Create new tasks for the next iteration:
+
+   **reviewer verdict `partial`** (quality issues → implementer):
+   ```
+   TaskCreate: subject="Re-implement (iteration N)"  activeForm="Re-implementing..."
+   TaskCreate: subject="Commit (iteration N)"        activeForm="Committing..."
+   TaskCreate: subject="Verify build (iteration N)"  activeForm="Verifying build..."
+   TaskCreate: subject="Run tests (iteration N)"     activeForm="Running tests..."
+   TaskCreate: subject="Re-review (iteration N)"     activeForm="Re-reviewing..."
+   ```
+
+   **reviewer verdict `fail-spec`** (spec issues → planner):
+   ```
+   TaskCreate: subject="Re-plan (iteration N)"       activeForm="Re-planning..."
+   (plus re-implement, commit, verify build, run tests, re-review)
+   ```
+
+   **reviewer verdict `fail`** (approach wrong → expert):
+   ```
+   TaskCreate: subject="Re-analyze (iteration N)"    activeForm="Re-analyzing..."
+   (plus re-plan, re-implement, commit, verify build, run tests, re-review)
+   ```
+
+### Phase 3 Tasks
+
+When entering Phase 3:
+
+```
+TaskCreate: subject="Push: Independent verification"  activeForm="Verifying..."
+TaskCreate: subject="Push: User review"               activeForm="Awaiting review..."
+TaskCreate: subject="Push: Create PR"                  activeForm="Creating PR..."
+```
+
+### Update Rules Summary
+
+1. **Before dispatching an agent**: `TaskUpdate` → `in_progress`
+2. **After agent returns**: `TaskUpdate` → `completed`
+3. **PM checkpoint**: Create "PM: Evaluate..." → `in_progress` → evaluate → `completed`
+4. **Unexpected routing**: `TaskCreate` a new task if routing leads to an unplanned agent
+5. **Fulfill-request**: `TaskCreate` sub-task "Consult: <agent> for <purpose>"
+
+---
+
+## Appendix B: Hardware Handoff Dispatch Template
+
+```
+Agent(subagent_type: "bash-expert", prompt: """
+You are the Bash Expert in the ROCm Agent Pipeline.
+You do NOT have the Agent tool.
+
+COMMAND RULES (mandatory):
+- NEVER use `cd /path && git ...` → use `git -C /path ...`
+- NEVER use `echo "$VAR"` or `printf ... "$VAR"` → use `printenv VAR`
+- NEVER use brace expansion `{a,b,c}` → spell out each argument
+- NEVER use `$VAR` or `$?` in any command → use `printenv VAR` or `cmd || echo FAILED`
+
+Workspace: <workspace>
+Thinking directory: <thinking_dir>
+Iteration: <iteration>
+
+Task: Produce a HARDWARE HANDOFF PLAN for executing a hardware-blocked
+investigation on a remote system. The investigation could not conclude
+locally because of a hardware/configuration constraint.
+
+Read the troubleshooter investigation first:
+  <thinking_dir>/investigations/<latest>-troubleshooter*.md
+Pay special attention to its `## Hardware Constraint` section — that's
+your primary input.
+
+Also read (for canonical test runner usage):
+  <plugin_root>/agents/tester.md  (§compute-utils Test Runners)
+
+Produce a single markdown document with these sections, in this order:
+
+1. **Target Environment** — exactly what hardware/config the operator must
+   provide (GPU arch, driver mode, XNACK setting, GPU count, OS).
+2. **Setup Checks** — copy-pasteable commands to confirm the target system
+   meets requirements. Each check shows expected output.
+3. **Reproduction Commands** — exact runner invocations for every test/binary
+   from the troubleshooter's "Tests / binaries involved". Prefer
+   `compute-utils/scripts/hip_test/run_hip_unit_test.sh` etc. Show: full
+   command, expected exit code, capture output, what "reproduces" vs
+   "does not reproduce" looks like.
+4. **Diagnostic Captures** — rocgdb / coredump / dmesg / strace for
+   SEGFAULT / hang / undefined-behavior cases.
+5. **What to Send Back** — numbered checklist of artifacts the operator
+   should return.
+6. **Local-vs-Remote Divergence Notes** — why local results were not
+   authoritative.
+
+Write the plan to:
+  <thinking_dir>/scripts/<iteration>-bash-expert-handoff.md
+
+Keep the plan executable — operator should be able to copy commands
+verbatim. Do NOT include `$VAR` expansions in any command in the plan.
+""")
+```
