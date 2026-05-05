@@ -115,11 +115,6 @@ cp "$PLUGIN_ROOT/templates/adding-third-party-dep.md" ./adding-third-party-dep.m
 # Task management structure
 mkdir -p tasks/active tasks/completed
 cp "$PLUGIN_ROOT/templates/example-task.md" ./tasks/active/example-task.md
-
-# Workflows
-mkdir -p workflows
-cp "$PLUGIN_ROOT/workflows/build-pipeline.md" ./workflows/
-cp "$PLUGIN_ROOT/workflows/debugging-tips.md" ./workflows/
 ```
 
 ## 7. Generate directory-map.md
