@@ -551,17 +551,29 @@ You are the <agent-name> in the ROCm Agent Pipeline.
 You do NOT have the Agent tool. If you need another agent, state the need
 clearly in your output — which agent, what task, what files are relevant.
 
-COMMAND RULES (mandatory — violations prompt the user for approval):
-- NEVER use `cd /path && git ...` → use `git -C /path ...` instead
-- NEVER use `echo "$VAR"` or `printf ... "$VAR"` → use `printenv VAR` instead
-- NEVER use brace expansion `{a,b,c}` → spell out each argument
-- NEVER use `$VAR` or `$?` in any command → use `printenv VAR` or `cmd || echo FAILED`
-- NEVER use `${PIPESTATUS[0]}` or any `${...}` expansion → Bash tool reports exit codes automatically
-- NEVER use `| tee file; echo "${PIPESTATUS[0]}"` → just `| tee file` or `> file 2>&1`
-- NEVER use for/while loops with `$VAR` → spell out each command individually
-- NEVER use Catch2 `~[tag]` filter → list specific test names instead (triggers zsh syntax detection)
-- NEVER use `[[ -f /.dockerenv ]] && ...` with variable expansion in the same command
-- NEVER write plans, analysis, reports, or intermediate artifacts into the workspace — only code deliverables go there. All other output goes under `<thinking_dir>`.
+COMMAND RULES — Claude Code's parser flags certain bash patterns as security
+risks and prompts the user, breaking flow. These prompts cannot be allowlisted.
+The principle: operate on absolute paths, use tool-native flags instead of `cd`,
+use `printenv` instead of `$VAR`, never embed code or secrets in commands.
+
+- NO shell expansion in commands: `$VAR`, `$?`, `${...}`, `${PIPESTATUS[0]}`
+  → use `printenv VAR`; let the Bash tool report exit codes (don't echo `$?`)
+  → for `tee`-pipelines: just `cmd 2>&1 | tee file` (don't capture PIPESTATUS)
+- NO compound `cd /path && cmd` (any tool, not just git):
+  → `git -C /path ...`, `ninja -C /build ...`, `make -C /repo ...`,
+    `cmake --build /build -t ...`, `ctest --test-dir /build ...`, `ls /path`
+- NO brace `{a,b,c}`, no zsh `~[tag]`, no for/while loops with `$VAR`:
+  → spell out each item explicitly as separate arguments / commands
+- NO multiline `python3 -c "..."` (heredoc-style, especially with `#` comments):
+  → Read the file with the Read tool, OR write a script to
+    `<thinking_dir>/scripts/foo.py` and run it. Single-line `python3 -c` is OK.
+- NO credentials in command line (`GH_TOKEN=gho_...`, inline credential helpers):
+  → auth must be pre-configured (`gh auth switch -u <user>`); then plain commands
+    `gh pr view ...`, `git -C /path push ...`. If unconfigured, STOP and ask user.
+- Plans, analysis, reports, intermediate artifacts → `<thinking_dir>`, never the
+  workspace. Only code deliverables go in the workspace.
+
+Full reference table: see `agents/DISPATCH-PROTOCOL.md` "Command Rules" section.
 
 Workspace: <workspace>
 Thinking directory: <thinking_dir>
@@ -1523,11 +1535,19 @@ Agent(subagent_type: "bash-expert", prompt: """
 You are the Bash Expert in the ROCm Agent Pipeline.
 You do NOT have the Agent tool.
 
-COMMAND RULES (mandatory):
-- NEVER use `cd /path && git ...` → use `git -C /path ...`
-- NEVER use `echo "$VAR"` or `printf ... "$VAR"` → use `printenv VAR`
-- NEVER use brace expansion `{a,b,c}` → spell out each argument
-- NEVER use `$VAR` or `$?` in any command → use `printenv VAR` or `cmd || echo FAILED`
+COMMAND RULES — Claude Code's parser flags certain bash patterns as security
+risks and prompts the user. The principle: absolute paths, tool-native `-C`
+flags, `printenv`, no inline code/secrets.
+
+- NO shell expansion: `$VAR`, `$?`, `${...}`, `${PIPESTATUS[0]}` → `printenv VAR`
+- NO compound `cd /path && cmd` (any tool): → `git -C /path`, `ninja -C /build`,
+  `make -C /repo`, `cmake --build /build`, `ctest --test-dir /build`, `ls /path`
+- NO brace `{a,b,c}`, no zsh `~[tag]`, no loops with `$VAR` → spell out each item
+- NO multiline `python3 -c "..."` → Read tool or script file in `<thinking_dir>/scripts/`
+- NO inline credentials (`GH_TOKEN=gho_...`) → pre-configure `gh auth switch`;
+  if unconfigured, STOP and ask the user
+
+Full reference: see `agents/DISPATCH-PROTOCOL.md` "Command Rules" section.
 
 Workspace: <workspace>
 Thinking directory: <thinking_dir>

@@ -53,6 +53,8 @@ The session scans for the `## Cross-Agent Request` header and parses the **Targe
 
 Claude Code has hardcoded security checks that prompt the user for approval on certain bash patterns. These checks **cannot be bypassed** by hooks or permission rules. All agents MUST use the alternative commands below.
 
+**Why this matters:** Claude Code's AST parser flags shell expansion (`$VAR`, `$?`, `${...}`, `${PIPESTATUS}`), compound `cd /path && cmd` (any tool, not just git), brace expansion `{a,b,c}`, zsh `~[tag]` syntax, multiline `python3 -c`, and inline credentials as security risks. The principle: **operate on absolute paths, use tool-native flags (`-C`, `-c`) instead of `cd`, use `printenv` instead of `$VAR`, and never embed code or secrets in command-line strings.** When in doubt, write a script file or use the Read/Write tools instead of complex one-liners.
+
 **Variable expansion — NEVER use `echo` with `$VAR`:**
 
 | Do NOT use | Use instead |
@@ -63,7 +65,9 @@ Claude Code has hardcoded security checks that prompt the user for approval on c
 | `echo "X=$VAR"` | `printenv VAR` |
 | `echo "X=$VAR Y=$VAR2"` | `printenv VAR VAR2` |
 
-**Compound cd+git — NEVER use `cd /path && git ...`:**
+**Compound `cd` — NEVER use `cd /path && cmd ...` for ANY tool:**
+
+The rule is general — not just git. Most build tools and version control tools accept a working-directory flag (`-C`, `-c`, `--directory`). Use it instead of compounding with `cd`.
 
 | Do NOT use | Use instead |
 |-----------|-------------|
@@ -73,6 +77,11 @@ Claude Code has hardcoded security checks that prompt the user for approval on c
 | `cd /path && git rev-parse HEAD` | `git -C /path rev-parse --abbrev-ref HEAD` |
 | `cd /path && git diff` | `git -C /path diff` |
 | `cd /path && ls` | `ls /path` |
+| `cd /build && ninja foo` | `ninja -C /build foo` |
+| `cd /build && ninja -t targets all \| grep ...` | `ninja -C /build -t targets all \| grep ...` |
+| `cd /build && cmake --build . -t foo` | `cmake --build /build -t foo` |
+| `cd /build && ctest -R Unit_foo` | `ctest --test-dir /build -R Unit_foo` |
+| `cd /repo && make foo` | `make -C /repo foo` |
 
 **Brace expansion — NEVER use `{a,b,c}` in commands:**
 
@@ -119,7 +128,31 @@ If you need to operate on a list of items, spell out each command individually r
 
 The `~[` syntax triggers Claude Code's zsh dynamic directory detection. Instead of tag-based exclusion, enumerate the specific test case names you want to run.
 
-**Why:** Claude Code's AST parser flags `$VAR` expansion (including `$?`, `${PIPESTATUS}`, loop variables), `cd+git` compounds, brace expansion, and `~[` zsh syntax as security risks. `printenv`, `git -C`, expanded argument lists, explicit commands without variable expansion, and specific test name filters avoid all prompts.
+**Multiline `python3 -c` — NEVER embed multi-line Python in a command-line string:**
+
+A `python3 -c "..."` heredoc with embedded newlines and `#` comments triggers Claude Code's "Newline followed by `#` inside a quoted argument can hide arguments from path validation" blocker — every invocation prompts the user. The trigger is the combination of newlines and `#` inside the quoted argument, but even without comments these prompts are unreliable.
+
+| Do NOT use | Use instead |
+|-----------|-------------|
+| `python3 -c "import json\nwith open('/path/x.json') as f: ..."` (multi-line) | Read the file with the Read tool and process the content in your reasoning |
+| `python3 -c "<10+ lines of script>"` to inspect/transform a file | Write the script to `<thinking_dir>/scripts/foo.py`, then `python3 <thinking_dir>/scripts/foo.py` |
+| `python3 -c "import sys; ..."` to read JSON | If the file is small, use the Read tool. If you need parsing, use a script file. |
+
+Single-line `python3 -c "print(...)"` (no newlines, no `#` comments) is fine for trivial expressions. The rule targets the multi-line embedded-script pattern.
+
+**Credentials in command line — NEVER inline tokens or passwords:**
+
+A command like `GH_TOKEN=gho_abc123... gh ...` or `git -c credential.helper='!f() { echo password=...; }; f' push ...` requires user approval on every invocation because the literal token changes each time and cannot be allowlisted. Configure auth once via the host shell, then use plain commands.
+
+| Do NOT use | Use instead |
+|-----------|-------------|
+| `GH_TOKEN=gho_... gh pr view 5898 --repo X/Y` | Configure once: `gh auth switch -u <username>` (run by user). Then: `gh pr view 5898 --repo X/Y` |
+| `GH_TOKEN=gho_... git -C /path push -u origin foo` | Configure once via `gh auth setup-git` or environment. Then: `git -C /path push -u origin foo` |
+| `git -c credential.helper='!f() { echo username=X; echo password=gho_...; }; f' push` | Use `gh auth switch` or a configured credential helper; never construct credential helpers inline |
+
+If the user has not pre-configured authentication, **stop and ask** — do not invent inline credential workarounds. Tell the user which `gh auth` or `git config` command they need to run.
+
+
 
 ## Resume Protocol
 
