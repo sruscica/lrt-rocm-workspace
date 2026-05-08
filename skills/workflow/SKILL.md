@@ -559,6 +559,8 @@ use `printenv` instead of `$VAR`, never embed code or secrets in commands.
 - NO shell expansion in commands: `$VAR`, `$?`, `${...}`, `${PIPESTATUS[0]}`
   → use `printenv VAR`; let the Bash tool report exit codes (don't echo `$?`)
   → for `tee`-pipelines: just `cmd 2>&1 | tee file` (don't capture PIPESTATUS)
+  → searching for literal `$VAR` text in files: use the Grep tool, OR replace
+    `$VAR` with `[$]VAR` in the regex (parser flags `$VAR` even inside quotes)
 - NO compound `cd /path && cmd` (any tool, not just git):
   → `git -C /path ...`, `ninja -C /build ...`, `make -C /repo ...`,
     `cmake --build /build -t ...`, `ctest --test-dir /build ...`, `ls /path`
@@ -1540,6 +1542,7 @@ risks and prompts the user. The principle: absolute paths, tool-native `-C`
 flags, `printenv`, no inline code/secrets.
 
 - NO shell expansion: `$VAR`, `$?`, `${...}`, `${PIPESTATUS[0]}` → `printenv VAR`
+  (searching for literal `$VAR` in files: use Grep tool or `[$]VAR` regex)
 - NO compound `cd /path && cmd` (any tool): → `git -C /path`, `ninja -C /build`,
   `make -C /repo`, `cmake --build /build`, `ctest --test-dir /build`, `ls /path`
 - NO brace `{a,b,c}`, no zsh `~[tag]`, no loops with `$VAR` → spell out each item

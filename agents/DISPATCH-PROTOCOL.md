@@ -65,6 +65,17 @@ Claude Code has hardcoded security checks that prompt the user for approval on c
 | `echo "X=$VAR"` | `printenv VAR` |
 | `echo "X=$VAR Y=$VAR2"` | `printenv VAR VAR2` |
 
+**Searching for literal `$VAR` text in files — the parser also flags `$VAR` inside grep/awk patterns, even when quoted (it can't tell intent from syntax). Use one of:**
+
+| Do NOT use | Use instead |
+|-----------|-------------|
+| `grep '$VAR' file` (search for the literal token `$VAR`) | Use the **Grep tool** (Claude Code built-in) — it doesn't go through the bash parser |
+| `grep "\\$VAR\|brace" file` (regex with `$VAR` alternative) | Replace `$VAR` with `[$]VAR` in the regex: `grep "[$]VAR\|brace" file` |
+| `grep -E '\\$\{[A-Z]+\}' file` | `grep -E '[$][{][A-Z]+[}]' file` |
+
+The character-class trick (`[$]` matches a literal `$`) makes the regex semantically identical while removing the `$VAR` token the parser objects to.
+
+
 **Compound `cd` — NEVER use `cd /path && cmd ...` for ANY tool:**
 
 The rule is general — not just git. Most build tools and version control tools accept a working-directory flag (`-C`, `-c`, `--directory`). Use it instead of compounding with `cd`.
